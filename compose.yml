@@ -1,0 +1,4 @@
+# compose.yaml   ← this becomes the default entrypoint
+include:
+  - compose.base.yml
+  - compose.dev.yml     # swap for .prod.yml on your prod server

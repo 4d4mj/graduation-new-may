@@ -1,0 +1,14 @@
+{
+	"compilerOptions": {
+		"paths": {
+			"@/*": ["./src/*"],
+			"@components/*": ["./src/components/*"],
+			"@hooks/*": ["./src/hooks/*"],
+			"@context/*": ["./src/context/*"],
+			"@schemas/*": ["./src/schemas/*"],
+			"@config/*": ["./src/config/*"],
+			"@auth/*": ["./src/app/auth/*"],
+			"@lib/*": ["./src/lib/*"],
+		}
+	}
+}

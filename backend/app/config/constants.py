@@ -1,0 +1,7 @@
+from enum import Enum
+
+class AgentName(str, Enum):
+    CONVERSATION = "CONVERSATION_AGENT"
+    RAG = "RAG_AGENT"
+    WEB_SEARCH = "WEB_SEARCH_PROCESSOR_AGENT"
+    INPUT_GUARDRAILS = "INPUT_GUARDRAILS"

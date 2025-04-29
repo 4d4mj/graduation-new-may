@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+asyncpg
+python-dotenv
+datamodel-code-generator
+pydantic-settings
+pydantic[email]
+alembic
+sqlalchemy[asyncio]
+passlib[bcrypt]
+python-jose[cryptography]
+jwt
+langchain
+langchain-core
+langchain-ollama
+langgraph

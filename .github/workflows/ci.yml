@@ -1,0 +1,182 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ "**" ]  # Run on all PR branches
+
+jobs:
+  schema-validation:
+    name: Validate Schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JSON Schema
+        run: |
+          echo "Validating shared JSON schemas..."
+          npm install -g ajv-cli
+          for f in shared/schemas/*.json; do
+            echo "Validating $f"
+            ajv validate -s http://json-schema.org/draft-07/schema -d "$f" || exit 1
+          done
+
+  code-generation:
+    name: Code Generation
+    needs: schema-validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install code generation tools
+        run: |
+          pip install datamodel-code-generator
+          cd frontend
+          npm ci
+
+      - name: Generate TypeScript & Python models
+        run: |
+          # Generate Pydantic models
+          mkdir -p backend/app/schemas
+          for f in shared/schemas/*.json; do
+            name=$(basename "$f" .json)
+            echo "Generating Pydantic model for $name"
+            datamodel-codegen \
+              --encoding utf-8 \
+              --input "$f" \
+              --input-file-type jsonschema \
+              --output "backend/app/schemas/${name}.py" \
+              --output-model-type pydantic_v2.BaseModel \
+              --snake-case-field
+          done
+
+          # Generate TypeScript models
+          mkdir -p frontend/src/schemas
+          cd frontend
+          for f in ../shared/schemas/*.json; do
+            name=$(basename "$f" .json)
+            echo "Generating Zod schema for $name"
+            npx json-schema-to-zod -i "$f" -o "src/schemas/${name}.ts"
+          done
+
+      - name: Verify generated code matches committed code
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "Generated code differs from committed code!"
+            git status
+            git diff
+            exit 1
+          fi
+
+  backend-tests:
+    name: Backend Tests
+    needs: code-generation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: graduation_db
+        ports: [ "5432:5432" ]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run database migrations
+        run: |
+          cd backend
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/graduation_db" > .env.test
+          echo "Running migrations..."
+          alembic upgrade head
+
+      - name: Lint with ruff
+        run: |
+          cd backend
+          pip install ruff
+          ruff check app
+
+      - name: Run tests
+        run: |
+          cd backend
+          pip install pytest pytest-asyncio
+          APP_ENV=test pytest
+
+  frontend-tests:
+    name: Frontend Tests
+    needs: code-generation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Lint
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Type check
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Run tests
+        run: |
+          cd frontend
+          npm test
+
+  docker-build:
+    name: Docker Build
+    needs: [backend-tests, frontend-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t graduation-backend:${{ github.sha }} ./backend
+
+      - name: Build frontend image
+        run: docker build -t graduation-frontend:${{ github.sha }} ./frontend
+
+      - name: Test backend image
+        run: |
+          docker compose -f compose.base.yml config
+          docker compose -f compose.base.yml -f compose.prod.yml config

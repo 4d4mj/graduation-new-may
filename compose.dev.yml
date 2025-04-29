@@ -1,0 +1,37 @@
+services:
+  backend:
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:2326@db:5432/postgres
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_CHAT_MODEL: "llama3"
+      OLLAMA_EMBED_MODEL: "nomic-embed-text:v1"
+    build:
+      context: ./backend
+      target: development
+    volumes:
+      - ./backend:/app
+      - ./shared:/shared
+    env_file: ./backend/.env.development
+    depends_on: [db]
+    ports: ["8000:8000"]   # uvicorn --reload inside Dockerfile or entrypoint
+
+  frontend:
+    image: node:20
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - node_modules:/app/node_modules   # named
+      - ./shared:/shared
+    environment:
+      NODE_ENV: development
+      # Use host.docker.internal so the browser inside the container can reach the host's published port
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      # server-side only (no NEXT_PUBLIC_)
+      API_INTERNAL_URL: http://backend:8000
+      WATCHPACK_POLLING: "true"
+    command: sh -c "npm ci && npm run dev"
+    ports: ["3000:3000"]
+    depends_on: [backend]
+
+volumes:
+  node_modules: {}

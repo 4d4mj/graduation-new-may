@@ -1,0 +1,44 @@
+# don’t copy your local virtualenv
+.venv
+env
+__pycache__
+*.py[cod]
+*.sqlite3
+
+# Git and editor cruft
+.git
+.gitignore
+.vscode/
+*.swp
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment and virtual environments
+.env
+.env.*
+.venv
+env/
+venv/
+ENV/
+
+# Local development settings
+.vscode/
+.idea/
+
+# Git
+.git
+.gitignore
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover
