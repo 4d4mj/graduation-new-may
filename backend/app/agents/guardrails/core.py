@@ -1,11 +1,10 @@
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import AIMessage
 from app.config.prompts import GUARDRAILS_INPUT_CHECK_PROMPT, GUARDRAILS_OUTPUT_CHECK_PROMPT
 
 # LangChain Guardrails
-class LocalGuardrails:
+class Guardrails:
     """Guardrails implementation using purely local components with LangChain."""
 
     def __init__(self, llm):

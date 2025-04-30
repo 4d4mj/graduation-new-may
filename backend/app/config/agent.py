@@ -15,9 +15,6 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.config.prompts import DECISION_SYSTEM_PROMPT
-from app.config.constants import AgentName
-
 
 # --------------------------------------------------------------------------- #
 # 1.  RAG-specific knobs (no direct LLM reference here any more)
@@ -36,6 +33,20 @@ class RAGSettings(BaseSettings):
         "cannot answer",
         "unable to answer",
     ]
+
+    # new: fine‑tune your chunking & embeddings
+    embedding_model_name: str = Field(
+        "models/text-embedding-004", env="RAG_EMBEDDING_MODEL_NAME"
+    )
+    chunk_size: int = Field(512, env="RAG_CHUNK_SIZE")
+    chunk_overlap: int = Field(50, env="RAG_CHUNK_OVERLAP")
+    vector_collection_name: str = Field(
+        "medical_documents", env="RAG_VECTOR_COLLECTION_NAME"
+    )
+
+    # new: reranker settings
+    reranker: str = Field("rerank-v3.5", env="RAG_RERANKER_MODEL")
+    reranker_top_k: int = Field(3, env="RAG_RERANKER_TOP_K")
 
     # local persistence
     local_path: Path = Path("./data/qdrant_db")
@@ -58,30 +69,7 @@ class AgentSettings(BaseSettings):
     # orchestrator knobs
     web_search_context_limit: int = 20
     max_conversation_history: int = 40
-    DECISION_SYSTEM_PROMPT: str = DECISION_SYSTEM_PROMPT
     CONFIDENCE_THRESHOLD: float = 0.85
-
-    # dynamic provider – “ollama”, “openai”, “azure”, …
-    provider: str = Field(default="ollama", validation_alias="LLM_PROVIDER")
-
-    # allowed agents
-    ALL_AGENTS: set[str] = {
-        AgentName.CONVERSATION.value,
-        AgentName.RAG.value,
-        AgentName.WEB_SEARCH.value,
-    }
-
-    ROLE_TO_ALLOWED: dict[str, set[str]] = {
-        "doctor": {
-            AgentName.CONVERSATION.value,
-            AgentName.RAG.value,
-            AgentName.WEB_SEARCH.value,
-        },
-        "patient": {
-            AgentName.CONVERSATION.value,
-            AgentName.RAG.value,
-        },
-    }
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",

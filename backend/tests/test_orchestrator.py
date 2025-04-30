@@ -3,11 +3,11 @@
 ###############
 # 0) Early stubs
 ###############
-import app.agents.orchestrator.routing as routing
+import app.agents.guardrails.nodes as nodes
 from app.config.constants import AgentName
 
 # stub analyze_input to bypass guard-rails entirely
-routing.analyze_input = lambda state: state
+nodes.apply_input_guardrails = lambda state: state
 
 # stub the decision step so it never hits LangChain
 def fake_route_to_agent(state):
@@ -15,10 +15,10 @@ def fake_route_to_agent(state):
     new_state = {**state, "agent_name": AgentName.RAG.value}
     return {"agent_state": new_state, "next": AgentName.RAG.value}
 
-routing.route_to_agent = fake_route_to_agent
+nodes.route_to_agent = fake_route_to_agent
 
 # confidence-based-rerouting won't be used in this simple test
-routing.confidence_based_routing = lambda state: AgentName.RAG.value
+nodes.confidence_based_routing = lambda state: AgentName.RAG.value
 
 ###############
 # 1) Stub out RAG/Web agents
@@ -33,14 +33,14 @@ web_mod.WebSearchProcessorAgent = DummyWebSearch
 ###############
 # 2) Stub out BOTH guardrails
 ###############
-import app.agents.guardrails.local_guardrails as guard_mod
+import app.agents.guardrails.core as guard_mod
 class DummyGuard:
     def __init__(self, *a, **kw): pass
     def check_input(self, t):   return (True, "")
     def check_output(self, o, i): return o
-guard_mod.LocalGuardrails = DummyGuard
+guard_mod.Guardrails = DummyGuard
 # also stub the second guard inside nodes.py
-import app.agents.orchestrator.nodes as nodes_mod
+import app.agents.runners as nodes_mod
 nodes_mod._get_output_guard = lambda: DummyGuard()
 
 ###############

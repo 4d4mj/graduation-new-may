@@ -1,8 +1,8 @@
 # tests/test_rag_node.py
 
 import pytest
-from app.agents.orchestrator.nodes import run_rag_agent
-from app.agents.orchestrator.state import init_agent_state
+from app.agents.runners import run_rag_agent
+from app.agents.states import init_agent_state
 
 # monkey-patch the real MedicalRAG to your DummyRAG
 import app.agents.rag as rag_mod

@@ -1,5 +1,6 @@
 // "use client";
 import { logout } from "./actions";
+import ChatBox from "./TEMP_Chatbox";
 
 export default function Dashboard({ user }) {
   return (
@@ -8,6 +9,7 @@ export default function Dashboard({ user }) {
         Hello, {user.first_name}!
       </h1>
       <p className="mb-4">Role: {user.role}</p>
+      <ChatBox />
       <form action={logout}>
         <button
           type="submit"
