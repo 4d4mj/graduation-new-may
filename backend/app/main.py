@@ -5,11 +5,10 @@ from .config.settings import settings
 from .db.base import get_engine
 from .db.session import get_db_session
 import logging
-from langgraph.checkpoint.memory import MemorySaver
 
 from app.core.mcp import MCPToolManager
 from app.config.mcp import load_mcp_config
-from app.agents.patient.graph import create_patient_graph
+from app.routes.chat.router import init_graphs
 
 # Set up logging
 logging.basicConfig(
@@ -40,13 +39,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("Critical error starting MCP Tool Manager")
 
-    # create two compiled graphs
-    app.state.graphs = {
-      "patient": create_patient_graph()
-                     .compile(checkpointer=MemorySaver()),
-    #   "doctor":  create_doctor_graph(prune_to=doctor_allowed)   COMMENTED OUT FOR NOW TO IMPLEMENT DOCTOR LATER
-    #                  .compile(checkpointer=MemorySaver()),
-    }
+    # Initialize graphs for both patient and doctor roles
+    app.state.graphs = init_graphs()
+    logger.info(f"Initialized graphs for roles: {list(app.state.graphs.keys())}")
 
     # give control back to FastAPI…
     yield
@@ -93,22 +88,21 @@ async def get_db():
 async def health_check(request: Request):
     """basic health check endpoint"""
     tool_manager_status = "stopped"
-    graph_status = "not loaded"
+    graphs_status = {}
 
     if hasattr(request.app.state, "tool_manager"):
         tool_manager_status = (
             "running" if request.app.state.tool_manager.is_running else "stopped"
         )
-    if (
-        hasattr(request.app.state, "main_graph")
-        and request.app.state.main_graph is not None
-    ):
-        graph_status = "loaded"
+
+    if hasattr(request.app.state, "graphs"):
+        for role, graph in request.app.state.graphs.items():
+            graphs_status[role] = "loaded" if graph is not None else "not loaded"
 
     return {
         "status": "ok",
         "mcp_client": tool_manager_status,
-        "main_graph": graph_status,
+        "graphs": graphs_status,
     }
 
 from app.routes.auth.router import router as auth_router

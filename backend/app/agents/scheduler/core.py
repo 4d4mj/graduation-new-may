@@ -38,13 +38,28 @@ class DummyScheduler:
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
 
-        # Determine if this is an appointment request
-        is_appointment_request = any(word in query.lower() for word in
-                                   ["schedule", "appointment", "book", "visit", "see", "doctor"])
+        # Determine if this is an explicit appointment request
+        is_explicit_request = any(word in query.lower() for word in
+                                ["schedule", "appointment", "book", "visit", "see", "doctor"])
 
-        if is_appointment_request:
-            # Select a random date and time
-            date = random.choice(list(self.available_slots.keys()))
+        # Check if this is an implicit request (symptom description or severity indicators)
+        symptom_words = ["pain", "ache", "hurt", "headache", "migraine", "severe", "worried", "worrying", "bad"]
+        severity_indicators = ["7", "8", "9", "10", "severe", "intense", "terrible", "unbearable", "worry"]
+
+        has_symptoms = any(word in query.lower() for word in symptom_words)
+        has_severity = any(indicator in query.lower() for indicator in severity_indicators)
+        is_implicit_request = has_symptoms and has_severity
+
+        # Respond with appointment if it's either an explicit or implicit request
+        if is_explicit_request or is_implicit_request:
+            # Select a date and time based on severity
+            available_dates = list(self.available_slots.keys())
+            # If severe, offer appointment sooner
+            if has_severity:
+                date = available_dates[0]  # Tomorrow
+            else:
+                date = random.choice(available_dates[1:3])  # Within next few days
+
             time = random.choice(self.available_slots[date])
 
             # Create appointment details
@@ -56,11 +71,21 @@ class DummyScheduler:
                 "confirmation_code": f"APPT-{random.randint(1000, 9999)}"
             }
 
-            response = (
-                f"I've scheduled an appointment for you on {date} at {time} with {appointment_details['doctor']}. "
-                f"Please arrive at {appointment_details['location']} 15 minutes before your appointment. "
-                f"Your confirmation code is {appointment_details['confirmation_code']}."
-            )
+            if is_implicit_request:
+                # More empathetic response for symptom-based requests
+                response = (
+                    f"Based on what you've described about your headache, I think it would be good to see a doctor soon. "
+                    f"I can offer you an appointment on {date} at {time} with {appointment_details['doctor']}. "
+                    f"The appointment will be at {appointment_details['location']}. "
+                    f"Would this time work for you, or would you prefer a different day or time?"
+                )
+            else:
+                # Standard booking confirmation
+                response = (
+                    f"I've scheduled an appointment for you on {date} at {time} with {appointment_details['doctor']}. "
+                    f"Please arrive at {appointment_details['location']} 15 minutes before your appointment. "
+                    f"Your confirmation code is {appointment_details['confirmation_code']}."
+                )
 
             return {
                 "response": response,

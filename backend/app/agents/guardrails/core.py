@@ -49,6 +49,40 @@ class Guardrails:
 
         return True, user_input
 
+    def needs_redaction(self, text: str, user_input: str = "") -> bool:
+        """
+        Only flag self-harm, illegal or PII - NOT generic advice.
+
+        Args:
+            text: The output text to check
+            user_input: The original user query (for context)
+
+        Returns:
+            Boolean indicating if the text needs redaction
+        """
+        if not text:
+            return False
+
+        result = self.output_guardrail_chain.invoke({
+            "output": text,
+            "user_input": user_input
+        })
+
+        # Only redact if explicitly marked as UNSAFE
+        return result.strip().upper().startswith("UNSAFE")
+
+    def safe_output(self, text: str) -> str:
+        """
+        Return a safe alternative when content must be redacted.
+
+        Args:
+            text: The original text (not used, just for signature)
+
+        Returns:
+            A safe alternative message
+        """
+        return "I'm sorry, I can't help with that request due to content safety guidelines."
+
     def check_output(self, output: str, user_input: str = "") -> str:
         """
         Process the model's output through safety filters.
@@ -66,9 +100,9 @@ class Guardrails:
         # Convert AIMessage to string if necessary
         output_text = output if isinstance(output, str) else output.content
 
-        result = self.output_guardrail_chain.invoke({
-            "output": output_text,
-            "user_input": user_input
-        })
+        # Check if redaction is needed
+        if self.needs_redaction(output_text, user_input):
+            return self.safe_output(output_text)
 
-        return result
+        # Otherwise return the original text untouched
+        return output_text

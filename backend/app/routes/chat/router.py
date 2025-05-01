@@ -7,11 +7,66 @@ from app.config.settings import env
 from app.agents.states import init_state_for_role
 from app.core.auth import decode_access_token
 from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
+from app.graphs.patient import create_patient_graph
+from app.graphs.doctor import create_doctor_graph
+from langgraph.checkpoint.memory import MemorySaver
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
 
 secure_cookie = env == "production"
+
+# Initialize the graphs at module level, to be used in the FastAPI app startup event
+role_graphs = {
+    "patient": None,
+    "doctor": None
+}
+
+def init_graphs():
+    """Initialize the graphs for each role with checkpointers."""
+    global role_graphs
+    role_graphs = {
+        "patient": create_patient_graph().compile(checkpointer=MemorySaver()),
+        "doctor": create_doctor_graph().compile(checkpointer=MemorySaver()),
+    }
+    return role_graphs
+
+async def rehydrate_state(thread_id: str, graph, role: str):
+    """
+    Pull stored state from the checkpointer if it exists.
+
+    Args:
+        thread_id: The unique identifier for the conversation thread
+        graph: The LangGraph instance to use for retrieving state
+        role: The user role (for initializing a new state if needed)
+
+    Returns:
+        Rehydrated state or a fresh state if none exists
+    """
+    try:
+        # Try to read previous state from the checkpointer
+        # Different checkers have different APIs
+        checkpointer = graph.checkpointer
+
+        if hasattr(checkpointer, 'get'):  # StandardMemorySaver/DBSaver pattern
+            saved = await checkpointer.get(thread_id)
+        elif hasattr(checkpointer, 'load'):  # Some implementations use load
+            saved = await checkpointer.load(thread_id)
+        elif hasattr(checkpointer, 'read_config'):  # Others might use read_config
+            saved = await checkpointer.read_config(thread_id)
+        else:
+            logger.warning(f"Unknown checkpointer type: {type(checkpointer)}")
+            saved = None
+
+        if saved:
+            logger.info(f"Found existing state for thread_id: {thread_id}")
+            return saved
+    except Exception as e:
+        logger.warning(f"Error reading state from checkpointer: {e}")
+
+    # Fall back to a fresh state
+    logger.info(f"Creating new state for thread_id: {thread_id}")
+    return init_state_for_role(role)
 
 @router.post("/", response_model=ChatResponse, status_code=200)
 async def chat(
@@ -29,40 +84,40 @@ async def chat(
         raise HTTPException(401, "Invalid session token")
 
     # 2) INITIALIZATION CHECK
-    tm    = request.app.state.tool_manager
-    graphs = request.app.state.graphs
-    if tm is None or not graphs:
-        raise HTTPException(500, "Not initialized")
+    if not role_graphs or not role_graphs.get(role):
+        # Initialize graphs if they don't exist
+        if not role_graphs.get(role):
+            init_graphs()
+            logger.info(f"Initialized graphs for roles: {list(role_graphs.keys())}")
+        # If still not available, raise an error
+        if not role_graphs.get(role):
+            raise HTTPException(400, f"Unknown role {role}")
 
-    graph = graphs.get(role)
-    if not graph:
-        raise HTTPException(400, f"Unknown role {role}")
+    graph = role_graphs.get(role)
 
-    # 3) PREPARE STATE
-    state = init_state_for_role(role)
-    logger.info("state is a %r", state)
+    # 3) PREPARE STATE WITH REHYDRATION
+    # Use the same session cookie as thread_id, or fall back to a new one
+    thread_id = session or str(uuid.uuid4())
+
+    # Rehydrate state from previous conversation if available
+    state = await rehydrate_state(thread_id, graph, role)
+    logger.info("State rehydrated or created for thread_id: %s", thread_id)
+
+    # Set the current input
     state["current_input"] = payload.message
 
-    # Convert history from payload into LangChain message format
-    messages = []
-    if payload.history:
-        for msg in payload.history:
-            if msg.role == "user":
-                messages.append(HumanMessage(content=msg.content))
-            elif msg.role == "assistant":
-                messages.append(AIMessage(content=msg.content))
+    # Preserve existing messages and append the new one
+    messages = state.get("messages", []) or []
 
-    # Add the current message
-    messages.append(HumanMessage(content=payload.message))
+    # Convert current message from payload into LangChain message format and append
+    current_message = HumanMessage(content=payload.message)
+    messages.append(current_message)
 
-    # Set the messages in state
+    # Set the updated messages in state
     state["messages"] = messages
     state["user_role"] = role
 
     # 4) INVOKE YOUR GRAPH/PROCESSOR
-    # Use the same session cookie as thread_id
-    # use a cookie-based thread id, or fall back to a new one
-    thread_id = session or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
@@ -105,14 +160,24 @@ async def chat(
         logger.warning("Empty reply detected or value is 'None'. Available keys: %s", list(final_state.keys()))
         reply = "I apologize, but I couldn't process your request. Please try again."
 
-    # build history (or persist in state if you want)
+    # Build history for response (keeping client-side synchronized)
     history = payload.history or []
     history.append(ChatMessage(role="user", content=payload.message))
     history.append(ChatMessage(role="assistant", content=reply))
 
+    # Ensure agent is a string, use a default if it's None
+    agent_name = final_state.get("agent_name")
+    if agent_name is None:
+        # If we don't have an agent_name but have intent, use that
+        if final_state.get("intent") is not None:
+            agent_name = final_state.get("intent")
+        # Otherwise use a generic fallback
+        else:
+            agent_name = "conversation"
+
     return ChatResponse(
         reply=reply,
-        agent=final_state.get("agent_name"),
+        agent=agent_name,
         messages=history,
         session_id=thread_id,
     )
