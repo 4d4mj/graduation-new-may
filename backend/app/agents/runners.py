@@ -47,7 +47,10 @@ def run_conversation_agent(state: BaseAgentState) -> BaseAgentState:
     # Invoke the model with the assembled message list
     response = llm.invoke(prompt_value.to_messages())
     output_msg = response if isinstance(response, AIMessage) else AIMessage(content=str(response))
+
+    # Set both output and final_output to ensure consistency
     state["output"] = output_msg
+    state["final_output"] = output_msg.content if hasattr(output_msg, "content") else str(output_msg)
     state["agent_name"] = AgentName.CONVERSATION.value
     return state
 
@@ -71,7 +74,10 @@ def run_rag_agent(state: BaseAgentState) -> BaseAgentState:
         output_msg = raw if isinstance(raw, AIMessage) else AIMessage(content=str(raw))
     else:
         output_msg = AIMessage(content="")
+
     state["output"] = output_msg
+    # Set final_output for consistency
+    state["final_output"] = output_msg.content if hasattr(output_msg, "content") else str(output_msg)
     state["needs_human_validation"] = False
     state["retrieval_confidence"] = confidence
     state["agent_name"] = AgentName.RAG.value
@@ -94,7 +100,10 @@ def run_web_search_processor_agent(state: BaseAgentState) -> BaseAgentState:
     combined = f"{agents}, {AgentName.WEB_SEARCH.value}" if agents else AgentName.WEB_SEARCH.value
     raw = processed
     output_msg = raw if isinstance(raw, AIMessage) else AIMessage(content=str(raw))
+
     state["output"] = output_msg
+    # Set final_output for consistency
+    state["final_output"] = output_msg.content if hasattr(output_msg, "content") else str(output_msg)
     state["agent_name"] = combined
     return state
 
@@ -103,6 +112,9 @@ def run_scheduler_agent(state: BaseAgentState) -> BaseAgentState:
     """Wrapper around the scheduling agent: handle appointment / scheduling requests."""
     # 1) Pull out the user's query
     query = state.get("current_input", "")
+
+    # Get the patient response text if it exists (from the patient analysis node)
+    patient_response = state.get("patient_response_text", "")
 
     # 2) Build a little chat-history context
     messages = state.get("messages", [])
@@ -115,19 +127,26 @@ def run_scheduler_agent(state: BaseAgentState) -> BaseAgentState:
 
     # 3) Call your scheduler "LLM" or tool
     scheduler = SchedulerAgent(settings)
-    # — assuming your DummyScheduler has a method `process_query(query, chat_history=…)`
     result = scheduler.process_schedule(query, chat_history=chat_history)
 
     # 4) Normalize into an AIMessage
-    #    if your result is a dict with keys, pull out `.get("response")`
     if isinstance(result, dict):
         resp = result.get("response", "")
     else:
         resp = result
+
+    # Ensure we have a valid response - use patient_response as fallback if needed
+    if not resp or resp == "None":
+        if patient_response:
+            resp = patient_response
+        else:
+            resp = "I can help you schedule an appointment with a healthcare professional. Would you like to do that now?"
+
     output = AIMessage(content=str(resp))
 
     # 5) Package back into state
     state["output"] = output
+    state["final_output"] = output.content if hasattr(output, "content") else str(output)
     state["agent_name"] = AgentName.SCHEDULER.value
 
     # 6) (Optional) If your scheduler returns structured details, stash them too:

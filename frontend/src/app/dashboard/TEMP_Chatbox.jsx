@@ -18,7 +18,8 @@ export default function ChatBox() {
 
     // 1) add the user message locally
     const userMsg = { role: "user", content: input };
-    setMessages((m) => [...m, userMsg]);
+    const newHistory = [...messages, userMsg];
+    setMessages(newHistory);
 
     const historyPayload = messages; // our prior messages
     const payload = {
@@ -30,6 +31,7 @@ export default function ChatBox() {
 
     try {
       // 2) call your backend; credentials: 'include' to send the session cookie
+      console.log("sending payload", payload)
       const res = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || "http://backend:8000"}/chat/`,
         {
@@ -40,9 +42,10 @@ export default function ChatBox() {
         }
       );
       const data = await res.json();
+      console.log(data)
 
       // 3) append the assistant’s reply
-      const assistantMsg = { role: "assistant", content: data.response };
+      const assistantMsg = { role: "assistant", content: data.reply };
       setMessages((m) => [...m, assistantMsg]);
     } catch (err) {
       console.error("Chat error:", err);

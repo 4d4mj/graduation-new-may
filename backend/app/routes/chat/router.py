@@ -68,21 +68,42 @@ async def chat(
     try:
         # <-- THIS is the key: await ainvoke, not a blocking call
         final_state = await graph.ainvoke(state, config=config)
+        logger.info("Final state keys: %s", list(final_state.keys()))
+
+        # Log actual values for debugging
+        logger.info("final_output: %r", final_state.get("final_output"))
+        logger.info("patient_response_text: %r", final_state.get("patient_response_text"))
+        logger.info("output: %r", final_state.get("output"))
     except Exception as e:
         logger.exception("Error running graph")
         raise HTTPException(500, f"Processing error: {e}")
 
-    # pull out whichever output field your graph writes
-    if final_state.get("final_output"):
-        reply = final_state["final_output"]
-    else:
-        out = final_state.get("output")
-        if isinstance(out, AIMessage):
-            reply = out.content
-        elif out is not None:
-            reply = str(out)
+    # Enhanced reply extraction with more robust fallbacks
+    reply = None
+
+    # Try final_output first
+    if final_state.get("final_output") is not None:
+        reply = str(final_state.get("final_output"))
+        logger.info("Using final_output for reply: %s", reply)
+
+    # Try output if final_output is empty or None
+    elif final_state.get("output") is not None:
+        output = final_state.get("output")
+        if isinstance(output, AIMessage):
+            reply = output.content
         else:
-            reply = ""
+            reply = str(output)
+        logger.info("Using output for reply: %s", reply)
+
+    # Try patient_response_text as fallback
+    elif final_state.get("patient_response_text") is not None:
+        reply = str(final_state.get("patient_response_text"))
+        logger.info("Using patient_response_text for reply: %s", reply)
+
+    # Final fallback
+    if reply is None or reply == "None":
+        logger.warning("Empty reply detected or value is 'None'. Available keys: %s", list(final_state.keys()))
+        reply = "I apologize, but I couldn't process your request. Please try again."
 
     # build history (or persist in state if you want)
     history = payload.history or []

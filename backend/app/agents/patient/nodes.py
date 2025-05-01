@@ -33,6 +33,7 @@ def analyze_patient_query(state: PatientState) -> PatientState:
             "I'm sorry, I didn't quite catch that. "
             "Could you please repeat your question?"
         )
+        state["final_output"] = state["patient_response_text"]  # Add this line
         state["request_scheduling"] = False
         return state
 
@@ -58,6 +59,7 @@ def analyze_patient_query(state: PatientState) -> PatientState:
         state["patient_response_text"] = (
             "Sorry, I'm having trouble understanding right now."
         )
+        state["final_output"] = state["patient_response_text"]  # Add this line
         state["request_scheduling"] = False
         return state
 
@@ -76,6 +78,7 @@ def analyze_patient_query(state: PatientState) -> PatientState:
         state["patient_response_text"] = (
             "Sorry, I encountered an error while processing your request."
         )
+        state["final_output"] = state["patient_response_text"]  # Add this line
         state["request_scheduling"] = False
         return state
 
@@ -83,6 +86,7 @@ def analyze_patient_query(state: PatientState) -> PatientState:
     state["patient_response_text"] = (
         response_text or "I'm not sure how to respond to that."
     )
+    state["final_output"] = state["patient_response_text"]  # Add this line
     state["request_scheduling"] = bool(request_sched_flag)
     logger.info(
         f"Patient analysis: scheduling={state['request_scheduling']}, "

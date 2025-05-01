@@ -9,7 +9,7 @@ _guard = None
 
 def _get_guard():
     global _guard
-    if _guard is None:
+    if (_guard is None):
         llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-preview-04-17",
         api_key=settings.google_api_key,
@@ -35,6 +35,8 @@ def apply_output_guardrails(state: BaseAgentState) -> BaseAgentState:
     txt = output.content if isinstance(output, AIMessage) else str(output)
     clean = guard.check_output(txt, state.get("current_input", "") or "")
     state["output"] = AIMessage(content=clean)
+    # Also set final_output for consistency across all nodes
+    state["final_output"] = clean
     state["messages"] = (state.get("messages", []) or []) + [state["output"]]
     return state
 
@@ -43,6 +45,9 @@ def perform_human_validation(state: BaseAgentState) -> BaseAgentState:
     # build and append a "please click yes/no" prompt
     output = state.get("output")
     txt = output.content if isinstance(output, AIMessage) else str(output)
-    state["output"] = AIMessage(content=f"{txt}\n\nHuman Validation Required:**\n- If you're a healthcare professional: Please validate the output. Select **Yes** or **No**. If No, provide comments.\n- If you're a patient: Simply click Yes to confirm.")
+    validation_message = f"{txt}\n\nHuman Validation Required:**\n- If you're a healthcare professional: Please validate the output. Select **Yes** or **No**. If No, provide comments.\n- If you're a patient: Simply click Yes to confirm."
+    state["output"] = AIMessage(content=validation_message)
+    # Also set final_output for consistency across all nodes
+    state["final_output"] = validation_message
     state["agent_name"] = state.get("agent_name", "") + ",HUMAN_VALIDATION"
     return state

@@ -9,7 +9,9 @@ from app.config.settings import settings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.constants import AgentName
 from app.config.agent import settings as agentSettings
+import logging
 
+logger = logging.getLogger(__name__)
 
 def route_to_agent(state: BaseAgentState) -> BaseAgentState:
     # 1) assemble user+last 6 turns
@@ -33,11 +35,26 @@ def route_to_agent(state: BaseAgentState) -> BaseAgentState:
     decision: AgentDecision = chain.invoke({"input": payload})
 
     state["agent_name"] = decision["agent"]
-    # pick next based on confidence
-    if (decision.get("confidence") or 0.0) < agentSettings.CONFIDENCE_THRESHOLD:
-        state["next_agent"] = "needs_validation"
+
+    # Map the agent name to the correct node in the graph
+    if decision["agent"] == "CONVERSATION_AGENT":
+        state["next_agent"] = AgentName.CONVERSATION.value
+    elif decision["agent"] == "RAG_AGENT":
+        state["next_agent"] = AgentName.RAG.value
+    elif decision["agent"] == "WEB_SEARCH_PROCESSOR_AGENT":
+        state["next_agent"] = AgentName.WEB_SEARCH.value
     else:
-        state["next_agent"] = decision["agent"]
+        # Default to conversation if we don't recognize the agent
+        logger.warning(f"Unrecognized agent: {decision['agent']}, defaulting to conversation")
+        state["next_agent"] = AgentName.CONVERSATION.value
+
+    logger.info(f"Routing to agent: {state['next_agent']}")
+
+    # Preserve patient_response_text in the final_output if it exists
+    # This ensures that patient responses from analyze_patient_query make it to the final state
+    if state.get("patient_response_text") and not state.get("final_output"):
+        state["final_output"] = state["patient_response_text"]
+
     return state
 
 def confidence_based_routing(state: BaseAgentState) -> str:
@@ -45,4 +62,4 @@ def confidence_based_routing(state: BaseAgentState) -> str:
     low_conf = state.get("retrieval_confidence", 0.0) < settings.rag.min_retrieval_confidence
     if low_conf or state.get("insufficient_info", False):
         return AgentName.WEB_SEARCH.value
-    return "check_validation"
+    return "perform_human_validation" # Changed from "check_validation" to match node name
