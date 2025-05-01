@@ -31,13 +31,37 @@ def apply_input_guardrails(state: BaseAgentState) -> BaseAgentState:
 
 def apply_output_guardrails(state: BaseAgentState) -> BaseAgentState:
     guard = _get_guard()
+
+    # Try to get the output from different possible sources
     output = state.get("output")
-    txt = output.content if isinstance(output, AIMessage) else str(output)
+
+    # If output is not available, try using final_output directly
+    if output is None and state.get("final_output") is not None:
+        txt = str(state.get("final_output"))
+    # Otherwise extract text from output if it exists
+    elif output is not None:
+        txt = output.content if isinstance(output, AIMessage) else str(output)
+    # Fall back to patient_response_text if available
+    elif state.get("patient_response_text") is not None:
+        txt = str(state.get("patient_response_text"))
+    # Last resort is an empty string
+    else:
+        txt = ""
+
+    # Apply guardrails to clean the output text
     clean = guard.check_output(txt, state.get("current_input", "") or "")
+
+    # Update state with cleaned text in multiple fields for consistency
     state["output"] = AIMessage(content=clean)
-    # Also set final_output for consistency across all nodes
     state["final_output"] = clean
+
+    # If patient_response_text exists, update it too for consistency
+    if "patient_response_text" in state:
+        state["patient_response_text"] = clean
+
+    # Append the message to conversation history
     state["messages"] = (state.get("messages", []) or []) + [state["output"]]
+
     return state
 
 

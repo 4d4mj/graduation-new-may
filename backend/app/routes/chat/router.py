@@ -8,7 +8,6 @@ from app.agents.states import init_state_for_role
 from app.core.auth import decode_access_token
 from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
 from app.graphs.patient import create_patient_graph
-from app.graphs.doctor import create_doctor_graph
 from langgraph.checkpoint.memory import MemorySaver
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -27,7 +26,6 @@ def init_graphs():
     global role_graphs
     role_graphs = {
         "patient": create_patient_graph().compile(checkpointer=MemorySaver()),
-        "doctor": create_doctor_graph().compile(checkpointer=MemorySaver()),
     }
     return role_graphs
 
@@ -138,7 +136,20 @@ async def chat(
 
     # Try final_output first
     if final_state.get("final_output") is not None:
-        reply = str(final_state.get("final_output"))
+        final_output = final_state.get("final_output")
+        # Handle AIMessage objects or objects with content attribute
+        if hasattr(final_output, 'content'):
+            reply = final_output.content
+        else:
+            # Extract text content from string representations of AIMessage
+            text_repr = str(final_output)
+            if "content='" in text_repr and "'" in text_repr.split("content='", 1)[1]:
+                # Extract content from string representation of AIMessage
+                content_part = text_repr.split("content='", 1)[1]
+                reply = content_part.split("'", 1)[0]
+            else:
+                reply = text_repr
+
         logger.info("Using final_output for reply: %s", reply)
 
     # Try output if final_output is empty or None

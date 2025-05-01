@@ -1,6 +1,7 @@
 from langgraph.graph import StateGraph, END
 from app.agents.states import BaseAgentState
 from app.agents.runners import run_scheduler_agent
+from langchain_core.messages import AIMessage
 
 def build_scheduler_graph() -> StateGraph:
     """
@@ -27,4 +28,14 @@ async def async_scheduler_wrapper(state, config):
     Returns:
         Updated state with scheduler response
     """
-    return run_scheduler_agent(state)
+    updated_state = run_scheduler_agent(state)
+
+    # Extract content from AIMessage if needed
+    if "output" in updated_state and isinstance(updated_state["output"], AIMessage):
+        updated_state["final_output"] = updated_state["output"].content
+
+    # Also handle if final_output is directly an AIMessage
+    if "final_output" in updated_state and hasattr(updated_state["final_output"], "content"):
+        updated_state["final_output"] = updated_state["final_output"].content
+
+    return updated_state
