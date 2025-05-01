@@ -42,6 +42,17 @@ def classify_patient_intent(state):
     ]):
         state["intent"] = Task.MEDICAL_QA.value
 
+    # Check for symptom descriptions (route these to patient analysis)
+    elif any(keyword in lower_text for keyword in [
+        "headache", "pain", "hurt", "ache", "fever", "sick", "sore",
+        "cough", "dizzy", "nausea", "tired", "exhausted", "vomit",
+        "burn", "burn", "sting", "rash", "itchy", "bleeding", "blood",
+        "i have a", "i've been", "i am feeling", "i'm feeling", "i feel",
+        "severe", "moderate", "mild", "chronic", "acute", "worsening"
+    ]):
+        # Explicitly route symptom descriptions to conversation, which will trigger patient analysis
+        state["intent"] = Task.CONVERSATION.value
+
     # Default to conversation
     else:
         state["intent"] = Task.CONVERSATION.value
