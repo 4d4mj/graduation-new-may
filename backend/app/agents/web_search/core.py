@@ -13,7 +13,7 @@ class DummyWebSearch:
     synthesizing information from web sources.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(self):
         """Initialize the dummy web search with simulated web sources."""
         # Simulate web search results for different medical topics
         self.simulated_web_results = {
@@ -83,7 +83,7 @@ class DummyWebSearch:
 
         logger.info("DummyWebSearch initialized with simulated web search results")
 
-    def process_web_search_results(self, query: str, **kwargs) -> Union[AIMessage, Dict[str, Any]]:
+    def process_web_search_results(self, query: str) -> Union[AIMessage, Dict[str, Any]]:
         """
         Process a web search query and return synthesized information.
 

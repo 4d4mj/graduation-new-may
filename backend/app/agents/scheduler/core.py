@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class DummyScheduler:
     """A more realistic dummy scheduler that simulates appointment scheduling."""
 
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(self):
         """Initialize the dummy scheduler with fake data."""
         self.available_slots = {
             # Generate some fake appointment slots for the next 7 days
@@ -20,7 +20,7 @@ class DummyScheduler:
         }
         logger.info("DummyScheduler initialized with fake appointment slots")
 
-    def process_schedule(self, query: str, chat_history: str = "", **kwargs: Any) -> Union[AIMessage, Dict[str, Any]]:
+    def process_schedule(self, query) -> Union[AIMessage, Dict[str, Any]]:
         """
         Process a scheduling request and return a response.
 

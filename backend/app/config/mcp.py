@@ -8,30 +8,36 @@ from typing import Dict, Any
 logger = logging.getLogger(__name__)
 
 
-def load_mcp_config(config_path: str = "./mcp_servers.json") -> Dict[str, Any]:
+def load_mcp_config(config_path: str = None) -> Dict[str, Any]:
     """
     Loads MCP server configuration from JSON file and resolve env variables
 
     Args:
         config_path (str, optional): path to the JSON configuration file.
+                                    If None, will look for the file relative to this module.
 
     Returns:
         A dictionairy containing the configuration for each MCP server.
         Returns an empty dictionary if the file is not found or if there is an error in parsing the JSON.
     """
-
     resolved_servers = {}
-    config_file = Path(config_path)
+
+    # If no path provided, use the mcp_servers.json file in the same directory as this module
+    if config_path is None:
+        module_dir = Path(__file__).parent
+        config_file = module_dir / "mcp_servers.json"
+    else:
+        config_file = Path(config_path)
 
     if not config_file.is_file():
-        logger.error(f"MCP configuration file was not found at {config_path}")
+        logger.error(f"MCP configuration file was not found at {config_file}")
         return resolved_servers
 
     try:
         with open(config_file, "r") as f:
             config_data = json.load(f)
 
-        logger.info(f"Loading MCP configuration from {config_path}")
+        logger.info(f"Loading MCP configuration from {config_file}")
 
         for server_name, server_conf in config_data.items():
             resolved_conf = server_conf.copy()

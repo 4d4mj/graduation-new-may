@@ -2,6 +2,10 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import AIMessage
 from app.config.prompts import GUARDRAILS_INPUT_CHECK_PROMPT, GUARDRAILS_OUTPUT_CHECK_PROMPT
+import logging
+from google.api_core.exceptions import ResourceExhausted
+
+logger = logging.getLogger(__name__)
 
 # LangChain Guardrails
 class Guardrails:
@@ -41,13 +45,20 @@ class Guardrails:
         Returns:
             Tuple of (is_allowed, message)
         """
-        result = self.input_guardrail_chain.invoke({"input": user_input})
+        try:
+            result = self.input_guardrail_chain.invoke({"input": user_input})
 
-        if result.startswith("UNSAFE"):
-            reason = result.split(":", 1)[1].strip() if ":" in result else "Content policy violation"
-            return False, AIMessage(content = f"I cannot process this request. Reason: {reason}")
+            if result.startswith("UNSAFE"):
+                reason = result.split(":", 1)[1].strip() if ":" in result else "Content policy violation"
+                return False, AIMessage(content = f"I cannot process this request. Reason: {reason}")
 
-        return True, user_input
+            return True, user_input
+        except ResourceExhausted as e:
+            logger.warning(f"API rate limit exceeded during input check: {str(e)}")
+            return True, user_input  # Allow the input to pass through when we can't check it
+        except Exception as e:
+            logger.exception(f"Error in input guardrails: {str(e)}")
+            return True, user_input  # Fall back to allowing the input
 
     def needs_redaction(self, text: str, user_input: str = "") -> bool:
         """
@@ -63,13 +74,20 @@ class Guardrails:
         if not text:
             return False
 
-        result = self.output_guardrail_chain.invoke({
-            "output": text,
-            "user_input": user_input
-        })
+        try:
+            result = self.output_guardrail_chain.invoke({
+                "output": text,
+                "user_input": user_input
+            })
 
-        # Only redact if explicitly marked as UNSAFE
-        return result.strip().upper().startswith("UNSAFE")
+            # Only redact if explicitly marked as UNSAFE
+            return result.strip().upper().startswith("UNSAFE")
+        except ResourceExhausted as e:
+            logger.warning(f"API rate limit exceeded during output check: {str(e)}")
+            return False  # Assume content is safe when we can't check it
+        except Exception as e:
+            logger.exception(f"Error checking if output needs redaction: {str(e)}")
+            return False  # Assume content is safe on error
 
     def safe_output(self, text: str) -> str:
         """
@@ -100,9 +118,18 @@ class Guardrails:
         # Convert AIMessage to string if necessary
         output_text = output if isinstance(output, str) else output.content
 
-        # Check if redaction is needed
-        if self.needs_redaction(output_text, user_input):
-            return self.safe_output(output_text)
+        try:
+            # Check if redaction is needed
+            if self.needs_redaction(output_text, user_input):
+                return self.safe_output(output_text)
 
-        # Otherwise return the original text untouched
-        return output_text
+            # Otherwise return the original text untouched
+            return output_text
+        except ResourceExhausted as e:
+            logger.warning(f"API rate limit exceeded during output check: {str(e)}")
+            # Provide a useful message to the user about rate limits
+            return "I'm currently experiencing high demand and have reached my usage limits. Please try again in a few minutes."
+        except Exception as e:
+            logger.exception(f"Error in output guardrails: {str(e)}")
+            # Return a graceful error message
+            return "I apologize, but I'm having trouble processing your request right now. Please try again shortly."

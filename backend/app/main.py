@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     logger.info("DB engine ready")
 
     # --- MCP TOOL MANAGER ---
-    mcp_server_configs = load_mcp_config(config_path="config/mcp_servers.json")
+    mcp_server_configs = load_mcp_config()
     tool_manager = MCPToolManager(mcp_server_configs)
     app.state.tool_manager = tool_manager
     try:

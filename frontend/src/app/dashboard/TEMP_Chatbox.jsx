@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 
 export default function ChatBox() {
   const [input, setInput] = useState("");
@@ -69,7 +70,7 @@ export default function ChatBox() {
                 m.role === "user" ? "bg-blue-200" : "bg-gray-200"
               }`}
             >
-              {m.content}
+              <ReactMarkdown>{m.content}</ReactMarkdown>
             </div>
           </div>
         ))}

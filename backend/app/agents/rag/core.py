@@ -12,7 +12,7 @@ class DummyRAG:
     from a knowledge base and generating contextual responses.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(self):
         """Initialize the dummy RAG system with fake knowledge base."""
         # Simulate a knowledge base with medical information
         self.knowledge_base = {
@@ -45,7 +45,7 @@ class DummyRAG:
         }
         logger.info("DummyRAG initialized with simulated medical knowledge base")
 
-    def process_query(self, query: str, *args, **kwargs) -> Dict[str, Any]:
+    def process_query(self, query) -> Dict[str, Any]:
         """
         Process a query using the simulated knowledge base.
 
