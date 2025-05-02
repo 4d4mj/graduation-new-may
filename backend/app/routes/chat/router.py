@@ -8,7 +8,6 @@ from app.agents.states import init_state_for_role
 from app.core.auth import decode_access_token
 from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
 from app.graphs.patient import create_patient_graph
-# from app.graphs.doctor import create_doctor_graph
 from langgraph.checkpoint.memory import MemorySaver
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -37,7 +36,6 @@ def init_graphs():
 
     role_graphs = {
         "patient": patient_graph,
-        # "doctor": create_doctor_graph().compile(checkpointer=MemorySaver()),
     }
 
     logger.info("Initialized graph with memory persistence for roles: %s", list(role_graphs.keys()))
@@ -46,7 +44,6 @@ def init_graphs():
 @router.post("/", response_model=ChatResponse, status_code=200)
 async def chat(
     payload: ChatRequest,
-    request: Request,
     session: str | None = Cookie(default=None, alias="session")
 ):
     # Get thread ID from session token
