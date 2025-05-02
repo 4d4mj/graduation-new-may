@@ -1,3 +1,4 @@
+from langchain.callbacks import StdOutCallbackHandler
 import uuid
 import logging
 from fastapi import APIRouter, HTTPException, Cookie, Request
@@ -71,15 +72,23 @@ async def chat(
 
     # 3) PREPARE MINIMAL INPUT
     input_state = init_state_for_role(role)
-    input_state["current_input"] = payload.message
-    input_state["messages"] = [HumanMessage(content=payload.message)]
+    input_state["messages"] = [HumanMessage(content=payload.message)]  # Only the new message
     input_state["user_role"] = role
+    # Removed: input_state["callbacks"] = [StdOutCallbackHandler()]  # This causes serialization issues
 
     # 4) RUN GRAPH - LangGraph handles state restoration and persistence
     try:
         final_state = await role_graphs[role].ainvoke(
             input_state,
-            config={"configurable": {"thread_id": thread_id}}
+            config={
+                # thread-local settings (persisted)
+                "configurable": {"thread_id": thread_id},
+
+                # run-only settings (NOT persisted)
+                "callbacks": [StdOutCallbackHandler()],  # Add callbacks here, where they won't be serialized
+                "recursion_limit": 15,          # safety-net
+                "run_kwargs": {"stream_mode": "updates"}  # Enable streaming updates
+            }
         )
     except Exception as e:
         logger.exception("Error running graph")

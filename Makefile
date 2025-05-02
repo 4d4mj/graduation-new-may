@@ -6,7 +6,7 @@
 COMPOSE_DEV = docker compose -f compose.base.yml -f compose.dev.yml
 COMPOSE_PROD = docker compose -f compose.base.yml -f ompose.prod.yml
 
-.PHONY: dev lint test gen-frontend gen-backend gen-all prod  psql backend down-dev
+.PHONY: dev lint test gen-frontend gen-backend gen-all prod  psql backend frontend down-dev
 
 # ─── DEVELOPMENT ───────────────────────────────────────────────────────────────
 
@@ -34,6 +34,9 @@ prod:          ## spin up prod images (uses standalone Next.js & built backend)
 
 backend: 	  ## Open the backend shell
 	docker compose -f compose.base.yml exec backend bash
+
+frontend:
+	docker compose -f compose.base.yml exec frontend-dev bash
 
 
 psql:          ## Open a psql shell to the database

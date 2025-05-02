@@ -56,7 +56,6 @@ def create_medical_agent():
             model=model,  # Changed from llm=model to model=model
             tools=tools,
             prompt=ASSISTANT_SYSTEM_PROMPT,  # Changed from system_message to prompt
-            checkpointer=MemorySaver(),
             debug=False,  # Added debug parameter instead of recursion_limit
             version="v1"  # Added explicit version
         )

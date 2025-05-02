@@ -71,12 +71,9 @@ def apply_output_guardrails(state: BaseAgentState) -> BaseAgentState:
         state["patient_response_text"] = clean
 
     # Ensure the last message the router will read is the cleaned answer
-    if not state.get("messages"):
-        state["messages"] = [AIMessage(content=clean)]
-    else:
-        # Append the cleaned answer if it's different from the last message or the last message is empty
-        if not state["messages"][-1].content.strip() or state["messages"][-1].content.strip() != clean:
-            state["messages"].append(AIMessage(content=clean))
+    last = state["messages"][-1] if state["messages"] else None
+    if not last or last.content.strip() != clean:
+        state["messages"].append(AIMessage(content=clean))
 
     return state
 
