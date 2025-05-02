@@ -41,6 +41,17 @@ def apply_output_guardrails(state: BaseAgentState) -> BaseAgentState:
     # Otherwise extract text from output if it exists
     elif output is not None:
         txt = output.content if isinstance(output, AIMessage) else str(output)
+    # Look for messages from a React agent
+    elif state.get("messages"):
+        # take the content of the last AI message
+        messages = state.get("messages", [])
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage):
+                txt = msg.content
+                break
+        else:
+            # No AI messages found
+            txt = ""
     # Fall back to patient_response_text if available
     elif state.get("patient_response_text") is not None:
         txt = str(state.get("patient_response_text"))
@@ -59,8 +70,13 @@ def apply_output_guardrails(state: BaseAgentState) -> BaseAgentState:
     if "patient_response_text" in state:
         state["patient_response_text"] = clean
 
-    # Append the message to conversation history
-    state["messages"] = (state.get("messages", []) or []) + [state["output"]]
+    # Ensure the last message the router will read is the cleaned answer
+    if not state.get("messages"):
+        state["messages"] = [AIMessage(content=clean)]
+    else:
+        # Append the cleaned answer if it's different from the last message or the last message is empty
+        if not state["messages"][-1].content.strip() or state["messages"][-1].content.strip() != clean:
+            state["messages"].append(AIMessage(content=clean))
 
     return state
 
