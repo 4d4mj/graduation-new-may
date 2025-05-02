@@ -6,7 +6,7 @@ export default function Dashboard({ user }) {
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-2">
-        Hello, {user.first_name}!
+        Hello, {user.patient_profile.first_name}!
       </h1>
       <p className="mb-4">Role: {user.role}</p>
       <ChatBox />

@@ -10,6 +10,8 @@ class DoctorModel(Base):
                         ForeignKey("users.id", ondelete="CASCADE"),
                         primary_key=True)
 
+    first_name = Column(String(50), nullable=False)
+    last_name  = Column(String(50), nullable=False)
     specialty  = Column(String(100), nullable=False)
 
     user = relationship("UserModel", back_populates="doctor_profile")
