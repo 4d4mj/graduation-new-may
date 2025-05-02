@@ -2,14 +2,28 @@ from langchain_core.tools import StructuredTool, BaseTool
 from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
+# ── built‑in tools
 from app.agents.tools import rag_query, web_search, small_talk
+# ── new scheduler tools
+from app.agents.scheduler.tools import (
+    list_free_slots,
+    book_appointment,
+    cancel_appointment,
+)
 from typing import Sequence
 import logging
 
 logger = logging.getLogger(__name__)
 
 # Define base tools that are always available
-BASE_TOOLS = [rag_query, web_search, small_talk]
+BASE_TOOLS = [
+    rag_query,
+    web_search,
+    small_talk,
+    list_free_slots,
+    book_appointment,
+    cancel_appointment,
+]
 
 ASSISTANT_SYSTEM_PROMPT = """You are a professional, empathetic medical assistant AI.
 
