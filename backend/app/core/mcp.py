@@ -35,6 +35,7 @@ class MCPToolManager:
 
             logger.info("Starting MCP Client")
 
+            # Filter out disabled servers
             self._active_server_configs = {
                 name: config
                 for name, config in self._raw_server_configs.items()
@@ -51,6 +52,31 @@ class MCPToolManager:
                 return
 
             try:
+                # Validate connection types - ensure they're either 'http' or have a 'command' parameter for stdio
+                for server_name, config in list(self._active_server_configs.items()):
+                    conn_type = config.get("connectionType", "").lower()
+
+                    if conn_type == "stdio" and "command" not in config:
+                        logger.warning(
+                            f"Server {server_name} is using stdio connectionType but missing 'command' parameter. Disabling."
+                        )
+                        del self._active_server_configs[server_name]
+
+                    # Make sure connectionType is explicit and lowercase
+                    if "connectionType" in config:
+                        self._active_server_configs[server_name][
+                            "connectionType"
+                        ] = conn_type
+
+                if not self._active_server_configs:
+                    logger.warning(
+                        "All MCP servers were filtered out due to invalid configurations."
+                    )
+                    self._client = None
+                    self._tools = []
+                    self._is_running = False
+                    return
+
                 logger.info(
                     f"Initializing MCP Client with servers: {list(self._active_server_configs.keys())}"
                 )

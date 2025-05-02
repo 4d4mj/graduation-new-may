@@ -1,12 +1,15 @@
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import StructuredTool, BaseTool
 from langgraph.prebuilt import create_react_agent
-from langgraph.checkpoint.memory import MemorySaver
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
 from app.agents.tools import rag_query, web_search, small_talk
+from typing import Sequence
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Define base tools that are always available
+BASE_TOOLS = [rag_query, web_search, small_talk]
 
 ASSISTANT_SYSTEM_PROMPT = """You are a professional, empathetic medical assistant AI.
 
@@ -38,9 +41,12 @@ SCHEDULING TOOLS:
 Decide which tool to use based on the patient's needs, and provide helpful, accurate information.
 """
 
-def create_medical_agent():
+def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):
     """
-    Create a React agent for medical assistance using LangGraph prebuilt components.
+    Build a React agent for medical assistance using LangGraph prebuilt components.
+
+    Args:
+        extra_tools (Sequence[BaseTool]): Additional tools to include, typically MCP tools
 
     Returns:
         A compiled agent that can be used as a node in the patient graph
@@ -53,15 +59,12 @@ def create_medical_agent():
             temperature=0.7
         )
 
-        # Get MCP tools for scheduling
-        # These will be injected later by the app.main.py lifespan manager
-        # We define a base set of tools here for testing and development
-        tools = [
-            rag_query,
-            web_search,
-            small_talk
-            # MCP scheduling tools will be added from app.state.tool_manager
-        ]
+        # Combine base tools with extra tools (typically MCP scheduling tools)
+        tools = list(BASE_TOOLS) + list(extra_tools)
+
+        # Log the tools being used
+        tool_names = [getattr(t, "name", str(t)) for t in tools]
+        logger.info(f"Building medical agent with tools: {tool_names}")
 
         # Create the React agent using the updated parameter names
         agent = create_react_agent(
@@ -79,5 +82,5 @@ def create_medical_agent():
         logger.error(f"Error creating medical agent: {str(e)}", exc_info=True)
         raise
 
-# Create and compile the agent for use in the graph
-medical_agent = create_medical_agent()
+# Create a placeholder that will be replaced in the application lifecycle
+medical_agent = None

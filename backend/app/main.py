@@ -9,7 +9,7 @@ import logging
 from app.core.mcp import MCPToolManager
 from app.config.mcp import load_mcp_config
 from app.routes.chat.router import init_graphs
-from app.graphs.sub.agent_node import medical_agent
+from app.graphs.sub import agent_node  # Import the module, not the variable
 from app.agents.scheduler.helpers import create_mcp_scheduler_tools
 
 # Set up logging
@@ -37,7 +37,12 @@ async def lifespan(app: FastAPI):
     mcp_server_configs = load_mcp_config()
     tool_manager = MCPToolManager(mcp_server_configs)
     app.state.tool_manager = tool_manager
+
+    # Enhanced scheduler tools list - will be populated after MCP client starts
+    enhanced_scheduler_tools = []
+
     try:
+        # Start the MCP client to discover tools
         await tool_manager.start_client()
         if tool_manager.is_running:
             logger.info("MCP Tool Manager started successfully")
@@ -49,11 +54,9 @@ async def lifespan(app: FastAPI):
             ])
 
             # Create enhanced versions of the scheduler tools with better descriptions
-            # and add the parse_booking_request tool
             if mcp_tools:
-                enhanced_tools = create_mcp_scheduler_tools(mcp_tools)
-                logger.info(f"Adding {len(enhanced_tools)} enhanced scheduler tools to medical agent")
-                medical_agent.tools.extend(enhanced_tools)
+                enhanced_scheduler_tools = create_mcp_scheduler_tools(mcp_tools)
+                logger.info(f"Found {len(enhanced_scheduler_tools)} enhanced scheduler tools")
             else:
                 logger.warning("No MCP scheduling tools were found!")
         else:
@@ -61,7 +64,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("Critical error starting MCP Tool Manager")
 
-    # Initialize graphs for both patient and doctor roles
+    # Build the medical agent with all tools (base + scheduler)
+    agent_node.medical_agent = agent_node.build_medical_agent(enhanced_scheduler_tools)
+
+    # Only verify MCP tools if we expected to have them and they were successfully retrieved
+    if enhanced_scheduler_tools and not any(t.name == "book_appointment" for t in agent_node.medical_agent.tools):
+        logger.warning("Scheduler tools missing from medical_agent despite being available from MCP!")
+        # Don't abort, just log a warning and continue with base tools
+
+    # Initialize graphs for both patient and doctor roles - AFTER agent is fully built
     app.state.graphs = init_graphs()
     logger.info(f"Initialized graphs for roles: {list(app.state.graphs.keys())}")
 
