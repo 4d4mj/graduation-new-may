@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from app.agents.guardrails.nodes import apply_input_guardrails, apply_output_guardrails
 from app.agents.states import PatientState
-from app.graphs.sub.agent_node import medical_agent
+from app.graphs.sub import agent_node
 import logging
 
 # Set up logging
@@ -23,7 +23,7 @@ def create_patient_graph() -> StateGraph:
 
     # Add nodes for guardrails and the unified agent
     g.add_node("guard_in", apply_input_guardrails)
-    g.add_node("agent", medical_agent.invoke)  # React agent handles all capabilities
+    g.add_node("agent", agent_node.medical_agent.invoke)  # React agent handles all capabilities
     g.add_node("apply_out", apply_output_guardrails)
 
     # Simplified linear flow

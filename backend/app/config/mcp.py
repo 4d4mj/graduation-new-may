@@ -41,6 +41,11 @@ def load_mcp_config(config_path: str = None) -> Dict[str, Any]:
 
         for server_name, server_conf in config_data.items():
             resolved_conf = server_conf.copy()
+            # app/config/mcp.py  ─ inside the for‑loop, right after  resolved_conf = server_conf.copy()
+            resolved_conf["connection_type"] = resolved_conf.pop("connectionType", resolved_conf.get("connection_type", "")).lower()
+            resolved_conf["base_url"]        = resolved_conf.pop("baseUrl",        resolved_conf.get("base_url", ""))
+            resolved_conf["auto_approve"]    = resolved_conf.pop("autoApprove",    resolved_conf.get("auto_approve", []))
+
 
             if "env" in resolved_conf and isinstance(resolved_conf["env"], dict):
                 resolved_env = {}

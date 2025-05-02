@@ -1,11 +1,16 @@
 {
-    "tavily-mcp": {
-      "connectionType": "http",
-      "baseUrl": "http://tavily-mcp:8080"
-    },
-    "scheduler-mcp": {
-      "connectionType": "http",
-      "baseUrl": "http://scheduler-mcp:5210",
-      "autoApprove": ["list_free_slots", "book_appointment", "cancel_appointment"]
-    }
-  }
+	"tavily-mcp": {
+		"disabled": true,
+		"connection_type": "http",
+		"base_url": "http://tavily-mcp:8080"
+	},
+	"scheduler-mcp": {
+		"connection_type": "http",
+		"base_url": "http://scheduler-mcp:5210",
+		"auto_approve": [
+			"list_free_slots",
+			"book_appointment",
+			"cancel_appointment"
+		]
+	}
+}
