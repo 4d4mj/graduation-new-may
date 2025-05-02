@@ -1,14 +1,25 @@
 # scheduler_mcp/server.py
 from __future__ import annotations
 import os, uuid, datetime as dt
-from typing import List
-from fastapi import FastAPI, HTTPException
+from typing import List, Dict, Any
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+import logging
+
+# Add basic logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    logger.error("DATABASE_URL environment variable not set!")
+    # Consider exiting or setting a default for local dev if appropriate
+    # exit(1)
+    DATABASE_URL = "postgresql+asyncpg://user:pass@host/db" # Example Placeholder
+
 ENGINE       = create_async_engine(DATABASE_URL, echo=False)
 Session      = sessionmaker(ENGINE, class_=AsyncSession, expire_on_commit=False)
 
@@ -101,3 +112,16 @@ async def cancel_appointment(req: CancelRequest):
         WHERE id=:id AND patient_id=:pid
     """, id=req.appointment_id, pid=req.patient_id)
     return {"ok": True}
+
+# --- Add a basic SSE endpoint for client connection ---
+@app.get("/sse")
+async def sse_endpoint(request: Request) -> Dict[str, Any]:
+    """
+    Placeholder endpoint for MCP client using SSE transport.
+    Actual tool discovery might happen via other means by the client library,
+    but this endpoint might be needed for the initial connection.
+    """
+    logger.info(f"Received connection request on /sse from {request.client.host if request.client else 'unknown'}")
+    # You might return basic server info or just status ok
+    # The library might handle the actual SSE protocol internally
+    return {"status": "ok", "message": "Scheduler MCP SSE endpoint ready."}

@@ -10,19 +10,11 @@ logger = logging.getLogger(__name__)
 
 def load_mcp_config(config_path: str = None) -> Dict[str, Any]:
     """
-    Loads MCP server configuration from JSON file and resolve env variables
-
-    Args:
-        config_path (str, optional): path to the JSON configuration file.
-                                    If None, will look for the file relative to this module.
-
-    Returns:
-        A dictionairy containing the configuration for each MCP server.
-        Returns an empty dictionary if the file is not found or if there is an error in parsing the JSON.
+    Loads MCP server configuration from JSON file, resolves env variables,
+    and transforms the structure to match MultiServerMCPClient expectations.
     """
-    resolved_servers = {}
+    transformed_servers = {}
 
-    # If no path provided, use the mcp_servers.json file in the same directory as this module
     if config_path is None:
         module_dir = Path(__file__).parent
         config_file = module_dir / "mcp_servers.json"
@@ -31,25 +23,26 @@ def load_mcp_config(config_path: str = None) -> Dict[str, Any]:
 
     if not config_file.is_file():
         logger.error(f"MCP configuration file was not found at {config_file}")
-        return resolved_servers
+        return transformed_servers
 
     try:
         with open(config_file, "r") as f:
-            config_data = json.load(f)
+            raw_config_data = json.load(f)
 
         logger.info(f"Loading MCP configuration from {config_file}")
 
-        for server_name, server_conf in config_data.items():
-            resolved_conf = server_conf.copy()
-            # app/config/mcp.py  ─ inside the for‑loop, right after  resolved_conf = server_conf.copy()
-            resolved_conf["connection_type"] = resolved_conf.pop("connectionType", resolved_conf.get("connection_type", "")).lower()
-            resolved_conf["base_url"]        = resolved_conf.pop("baseUrl",        resolved_conf.get("base_url", ""))
-            resolved_conf["auto_approve"]    = resolved_conf.pop("autoApprove",    resolved_conf.get("auto_approve", []))
+        for server_name, raw_conf in raw_config_data.items():
+            # Start with a clean dictionary for the transformed config
+            transformed_conf = {}
 
+            # --- Copy essential flags first ---
+            transformed_conf["disabled"] = raw_conf.get("disabled", False)
+            transformed_conf["auto_approve"] = raw_conf.get("autoApprove", raw_conf.get("auto_approve", [])) # Allow both casings
 
-            if "env" in resolved_conf and isinstance(resolved_conf["env"], dict):
+            # --- Environment variable resolution (if needed) ---
+            if "env" in raw_conf and isinstance(raw_conf["env"], dict):
                 resolved_env = {}
-                for key, value in resolved_conf["env"].items():
+                for key, value in raw_conf["env"].items():
                     if isinstance(value, str) and value.startswith("env:"):
                         env_var_name = value[4:]
                         env_var_value = os.getenv(env_var_name)
@@ -60,25 +53,54 @@ def load_mcp_config(config_path: str = None) -> Dict[str, Any]:
                             resolved_env[key] = ""
                         else:
                             resolved_env[key] = env_var_value
-                            logger.debug(
-                                f"resolved env var '{env_var_name}' for MCP server {server_name}"
-                            )
                     else:
                         resolved_env[key] = value
-                resolved_conf["env"] = resolved_env
+                transformed_conf["env"] = resolved_env
 
-            resolved_servers[server_name] = resolved_conf
+
+            # --- Transformation based on connection type ---
+            connection_type = raw_conf.get("connection_type", raw_conf.get("connectionType", "")).lower() # Allow both casings
+
+            if connection_type == "http":
+                base_url = raw_conf.get("base_url", raw_conf.get("baseUrl", "")) # Allow both casings
+                if not base_url:
+                     logger.warning(f"HTTP server '{server_name}' missing 'base_url'. Skipping.")
+                     continue # Skip this server if essential info is missing
+
+                # Use 'sse' transport and 'url' as per documentation for HTTP-based servers
+                transformed_conf["transport"] = "sse" # Use 'sse' as shown in docs
+                transformed_conf["url"] = f"{base_url}/sse" # Construct the expected SSE endpoint URL
+                logger.info(f"Transformed '{server_name}' config for HTTP: transport='sse', url='{transformed_conf['url']}'")
+
+            elif connection_type == "stdio":
+                 command = raw_conf.get("command")
+                 args = raw_conf.get("args")
+                 if not command:
+                     logger.warning(f"Stdio server '{server_name}' missing 'command'. Skipping.")
+                     continue # Skip this server
+
+                 transformed_conf["transport"] = "stdio"
+                 transformed_conf["command"] = command
+                 transformed_conf["args"] = args if args is not None else [] # Ensure args is a list
+                 logger.info(f"Transformed '{server_name}' config for Stdio: transport='stdio', command='{command}'")
+
+            else:
+                logger.warning(f"Unknown connection_type '{connection_type}' for server '{server_name}'. Skipping.")
+                continue # Skip unsupported types
+
+            transformed_servers[server_name] = transformed_conf
 
         logger.info(
-            f"succesfully loaded and resolved {len(resolved_servers)} MCP server configurations"
+            f"Successfully loaded and transformed {len(transformed_servers)} MCP server configurations"
         )
-        return resolved_servers
+        logger.debug(f"Transformed MCP Config for Client: {transformed_servers}")
+        return transformed_servers
 
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing MCP JSON configuration file '{config_path}' : {e}")
         return {}
     except Exception as e:
         logger.error(
-            f"An unexpected error occured while loading MCP config '{config_path}' : {e}"
+            f"An unexpected error occurred while loading/transforming MCP config '{config_path}' : {e}"
         )
         return {}
