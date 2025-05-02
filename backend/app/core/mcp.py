@@ -59,9 +59,6 @@ class MCPToolManager:
                 await self._client.__aenter__()
                 self._is_running = True
                 logger.info("MCP client is starting...")
-
-                await asyncio.sleep(10)
-
                 self._tools = self._client.get_tools()
                 logger.info(
                     f"MCP client started. Tools available: {[t.name for t in self._tools]}"

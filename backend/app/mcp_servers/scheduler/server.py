@@ -14,7 +14,7 @@ Session      = sessionmaker(ENGINE, class_=AsyncSession, expire_on_commit=False)
 
 app = FastAPI(
     title="scheduler-mcp",
-    description="MCP tool‑server that manages appointments",
+    description="MCP tool-server that manages appointments",
     version="0.1.0"
 )
 

@@ -11,7 +11,7 @@ services:
     volumes:
       - ./backend:/app
     env_file: ./backend/.env.development
-    depends_on: [db]
+    depends_on: [db, scheduler-mcp, tavily-mcp]
     ports: ["8000:8000"]   # uvicorn --reload inside Dockerfile or entrypoint
 
   frontend:

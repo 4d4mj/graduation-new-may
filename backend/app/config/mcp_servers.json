@@ -1,19 +1,11 @@
 {
     "tavily-mcp": {
-        "command": "npx",
-        "args": ["-y", "tavily-mcp@0.1.4"],
-        "env": {
-            "TAVILY_API_KEY": "env:TAVILY_API_KEY"
-        },
-        "disabled": false,
-        "autoApprove": []
+      "connectionType": "http",
+      "baseUrl": "http://tavily-mcp:8080"
     },
     "scheduler-mcp": {
-        "command": "uvicorn",
-        "args": ["app.mcp_servers.scheduler.server:app", "--host", "0.0.0.0", "--port", "5210"],
-        "env": {
-            "DATABASE_URL": "env:DATABASE_URL"
-        },
-        "autoApprove": ["list_free_slots", "book_appointment", "cancel_appointment"]
+      "connectionType": "http",
+      "baseUrl": "http://scheduler-mcp:5210",
+      "autoApprove": ["list_free_slots", "book_appointment", "cancel_appointment"]
     }
-}
+  }
