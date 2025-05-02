@@ -11,23 +11,24 @@ from app.config.agent import settings as agentSettings
 logger = logging.getLogger(__name__)
 
 @tool("rag_query", return_direct=False)
-def rag_query(query: str) -> AIMessage:
+def rag_query(query: str) -> str:
     """
     Retrieve medical knowledge for a patient query from a trusted medical database.
     Use this when the user asks about medical conditions, treatments, or general health information.
     """
     rag = DummyRAG()
     resp = rag.process_query(query)
-    return resp["response"]
+    return resp["response"].content if hasattr(resp["response"], "content") else str(resp["response"])
 
 @tool("web_search", return_direct=False)
-def web_search(query: str) -> AIMessage:
+def web_search(query: str) -> str:
     """
     Perform a web search for current medical information that might not be in our database.
     Use this for recent medical news, emerging treatments, or when you need supplementary information.
     """
     web = DummyWebSearch()
-    return web.process_web_search_results(query)
+    result = web.process_web_search_results(query)
+    return result.content if hasattr(result, "content") else str(result)
 
 # Removed the schedule_appointment tool that used DummyScheduler
 
@@ -37,4 +38,4 @@ def small_talk(user_message: str) -> str:
     Handle general conversation, greetings, and non-medical chat.
     Use this for casual conversation or when the patient is making small talk.
     """
-    return f"I'm here to help with any medical questions or concerns. Is there something specific about your health you'd like to discuss?"
+    return "I'm here to help with any medical questions or concerns. Is there something specific about your health you'd like to discuss?"

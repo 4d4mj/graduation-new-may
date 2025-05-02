@@ -131,7 +131,11 @@ async def chat(
             "rag_query": "medical_knowledge",
             "web_search": "web_search",
             "schedule_appointment": "scheduler",
-            "small_talk": "conversation"
+            "small_talk": "conversation",
+            # Add mappings for the new scheduler tools
+            "list_free_slots": "scheduler",
+            "book_appointment": "scheduler",
+            "cancel_appointment": "scheduler"
         }
         agent_name = tool_to_agent.get(tool_name, agent_name)
 
