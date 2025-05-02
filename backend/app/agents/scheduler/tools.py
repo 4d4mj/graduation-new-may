@@ -37,15 +37,55 @@ def parse_iso_date(day_str: str | None) -> date:
 
 # Helper to parse time string and combine with date
 def parse_datetime_str(datetime_str: str) -> datetime | None:
-    """Parses YYYY-MM-DDTHH:MM:SS or similar ISO format"""
+    """
+    Parses various datetime formats and standardizes to UTC.
+    Supports ISO format (YYYY-MM-DDTHH:MM:SS) with or without timezone.
+    Also attempts to handle common non-ISO formats.
+    """
+    if not datetime_str:
+        logger.error("Empty datetime string provided")
+        return None
+
+    # Strip any extra whitespace that might cause parsing errors
+    datetime_str = datetime_str.strip()
+
     try:
-        # Attempt parsing with timezone, fallback to naive then assume UTC
-        dt = datetime.fromisoformat(datetime_str)
+        # First attempt: Standard ISO format with fromisoformat
+        try:
+            dt = datetime.fromisoformat(datetime_str)
+        except ValueError:
+            # Second attempt: Try to handle common non-ISO formats
+            formats_to_try = [
+                "%Y-%m-%d %H:%M:%S",  # 2025-05-03 14:30:00
+                "%Y-%m-%d %H:%M",      # 2025-05-03 14:30
+                "%Y/%m/%d %H:%M:%S",   # 2025/05/03 14:30:00
+                "%Y/%m/%d %H:%M",      # 2025/05/03 14:30
+                "%d-%m-%Y %H:%M:%S",   # 03-05-2025 14:30:00
+                "%d-%m-%Y %H:%M",      # 03-05-2025 14:30
+                "%d/%m/%Y %H:%M:%S",   # 03/05/2025 14:30:00
+                "%d/%m/%Y %H:%M",      # 03/05/2025 14:30
+            ]
+
+            for fmt in formats_to_try:
+                try:
+                    dt = datetime.strptime(datetime_str, fmt)
+                    logger.info(f"Parsed datetime using alternative format: {fmt}")
+                    break
+                except ValueError:
+                    continue
+            else:  # If no format worked
+                logger.error(f"Failed to parse datetime with any supported format: {datetime_str}")
+                return None
+
+        # Ensure timezone is set (use UTC if none provided)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc) # Assume UTC if naive
-        return dt.astimezone(timezone.utc) # Convert to UTC
-    except ValueError:
-        logger.error(f"Invalid datetime format for booking: {datetime_str}")
+            dt = dt.replace(tzinfo=timezone.utc)
+
+        # Convert to UTC for storage
+        return dt.astimezone(timezone.utc)
+
+    except Exception as e:
+        logger.error(f"Unexpected error parsing datetime '{datetime_str}': {str(e)}")
         return None
 
 # ------------------------------------------------------------------ tools
