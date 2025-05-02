@@ -7,5 +7,13 @@
         },
         "disabled": false,
         "autoApprove": []
+    },
+    "scheduler-mcp": {
+        "command": "uvicorn",
+        "args": ["app.mcp_servers.scheduler.server:app", "--host", "0.0.0.0", "--port", "5210"],
+        "env": {
+            "DATABASE_URL": "env:DATABASE_URL"
+        },
+        "autoApprove": ["list_free_slots", "book_appointment", "cancel_appointment"]
     }
 }

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from .config.settings import settings
@@ -9,12 +9,19 @@ import logging
 from app.core.mcp import MCPToolManager
 from app.config.mcp import load_mcp_config
 from app.routes.chat.router import init_graphs
+from app.graphs.sub.agent_node import medical_agent
+from app.agents.scheduler.helpers import create_mcp_scheduler_tools
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Database dependency
+async def get_db():
+    async for session in get_db_session(str(settings.database_url)):
+        yield session
 
 # lifespan context manager for FastAPI
 @asynccontextmanager
@@ -34,6 +41,21 @@ async def lifespan(app: FastAPI):
         await tool_manager.start_client()
         if tool_manager.is_running:
             logger.info("MCP Tool Manager started successfully")
+            # Get scheduler MCP tools
+            mcp_tools = tool_manager.get_tools_for_agent([
+                "list_free_slots",
+                "book_appointment",
+                "cancel_appointment"
+            ])
+
+            # Create enhanced versions of the scheduler tools with better descriptions
+            # and add the parse_booking_request tool
+            if mcp_tools:
+                enhanced_tools = create_mcp_scheduler_tools(mcp_tools)
+                logger.info(f"Adding {len(enhanced_tools)} enhanced scheduler tools to medical agent")
+                medical_agent.tools.extend(enhanced_tools)
+            else:
+                logger.warning("No MCP scheduling tools were found!")
         else:
             logger.error("MCP Tool Manager failed to start")
     except Exception as e:
@@ -77,11 +99,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Database dependency
-async def get_db():
-    async for session in get_db_session(str(settings.database_url)):
-        yield session
 
 # health check
 @app.get("/health")

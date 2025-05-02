@@ -73,6 +73,7 @@ async def chat(
     # 3) PREPARE MINIMAL INPUT
     input_state = init_state_for_role(role)
     input_state["messages"] = [HumanMessage(content=payload.message)]  # Only the new message
+    input_state["current_input"] = payload.message  # Add back for guardrails to access original text
     input_state["user_role"] = role
     # Removed: input_state["callbacks"] = [StdOutCallbackHandler()]  # This causes serialization issues
 
@@ -94,24 +95,54 @@ async def chat(
         logger.exception("Error running graph")
         raise HTTPException(500, f"Processing error: {e}")
 
-    # 5) EXTRACT REPLY - simplified approach
-    messages = final_state.get("messages", [])
-    if messages and isinstance(messages[-1], AIMessage) and messages[-1].content.strip():
-        reply = messages[-1].content
-    else:
-        reply = "I apologize, but I couldn't process your request properly. Please try again."
+    # Log final state keys for debugging
+    if MEMORY_DEBUG:
+        logger.debug(f"[MEMORY] final_state keys: {list(final_state.keys())}")
+
+    # 5) EXTRACT REPLY - robust version
+    reply: str | None = None
+
+    # ① prefer the cleaned / canonical answer
+    for key in ("final_output", "output"):
+        if (txt := final_state.get(key)) and str(txt).strip():
+            reply = txt.content if hasattr(txt, "content") else str(txt)
+            break
+
+    # ② otherwise fall back to the last assistant / tool message
+    if reply is None:
+        for msg in reversed(final_state.get("messages", [])):
+            if hasattr(msg, "content") and str(msg.content).strip():
+                reply = msg.content
+                break
+
+    # ③ last resort
+    if reply is None:
+        reply = (
+            "I'm sorry, I couldn't process your request right now. "
+            "Please try again in a moment."
+        )
 
     # Determine which agent or tool was used (if needed)
     agent_name = "medical_assistant"
     tool_calls = final_state.get("tool_calls", [])
     if tool_calls and isinstance(tool_calls[-1], dict) and "name" in tool_calls[-1]:
+        tool_name = tool_calls[-1]["name"]
         tool_to_agent = {
             "rag_query": "medical_knowledge",
             "web_search": "web_search",
             "schedule_appointment": "scheduler",
             "small_talk": "conversation"
         }
-        agent_name = tool_to_agent.get(tool_calls[-1]["name"], agent_name)
+        agent_name = tool_to_agent.get(tool_name, agent_name)
+
+        # Log which tool was chosen - helpful for diagnosing conversation flow issues
+        logger.debug(f"[FLOW] Tool chosen: {tool_name}")
+
+        # For appointment scheduling specifically, log additional details
+        if tool_name == "schedule_appointment" and "output" in final_state:
+            output = final_state["output"]
+            content = output.content if hasattr(output, "content") else str(output)
+            logger.debug(f"[FLOW] Scheduler output: {content[:100]}...")
 
     # Return the response with minimal history construction
     return ChatResponse(

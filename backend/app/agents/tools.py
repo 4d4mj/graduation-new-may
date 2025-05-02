@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage
 
 from app.agents.rag.core import DummyRAG
 from app.agents.web_search.core import DummyWebSearch
-from app.agents.scheduler.core import DummyScheduler
+# Removed import for DummyScheduler
 from app.config.agent import settings as agentSettings
 
 logger = logging.getLogger(__name__)
@@ -29,23 +29,7 @@ def web_search(query: str) -> AIMessage:
     web = DummyWebSearch()
     return web.process_web_search_results(query)
 
-@tool("schedule_appointment", return_direct=False)
-def schedule_appointment(query: str) -> Union[AIMessage, Dict[str, Any]]:
-    """
-    Book or suggest appointments based on patient symptoms or direct requests.
-    Use this when the patient wants to schedule a visit or when their symptoms suggest they should see a doctor.
-    """
-    sched = DummyScheduler()
-    result = sched.process_schedule(query)
-
-    # Handle both AIMessage and dict return types
-    if isinstance(result, dict) and "response" in result:
-        if isinstance(result["response"], AIMessage):
-            return result["response"]
-        else:
-            return AIMessage(content=str(result["response"]))
-    else:
-        return result
+# Removed the schedule_appointment tool that used DummyScheduler
 
 @tool("small_talk", return_direct=True)
 def small_talk(user_message: str) -> str:

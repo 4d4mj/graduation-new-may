@@ -18,6 +18,7 @@ class DummyScheduler:
             ["09:00", "10:30", "14:00", "16:30"]
             for d in range(1, 8)
         }
+        self.previous_offer = None  # Track the last appointment offered
         logger.info("DummyScheduler initialized with fake appointment slots")
 
     def process_schedule(self, query) -> Union[AIMessage, Dict[str, Any]]:
@@ -37,6 +38,28 @@ class DummyScheduler:
         # Extract possible date mentions from the query (very simplistic)
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+
+        # Check for confirmation of previous offer
+        is_confirmation = False
+        confirmation_words = ["yes", "yeah", "sure", "okay", "ok", "great", "sounds good", "perfect", "please"]
+
+        if self.previous_offer and any(word in query.lower() for word in confirmation_words):
+            is_confirmation = True
+            logger.info("Detected confirmation of previous appointment offer")
+            appointment_details = self.previous_offer
+
+            # Create confirmation response
+            response = (
+                f"Great! I've confirmed your appointment for {appointment_details['date']} at {appointment_details['time']} "
+                f"with {appointment_details['doctor']}. Please arrive at {appointment_details['location']} "
+                f"15 minutes before your appointment. Your confirmation code is {appointment_details['confirmation_code']}."
+            )
+
+            return {
+                "response": response,
+                "appointment_details": appointment_details,
+                "status": "confirmed"
+            }
 
         # Determine if this is an explicit appointment request
         is_explicit_request = any(word in query.lower() for word in
@@ -71,10 +94,13 @@ class DummyScheduler:
                 "confirmation_code": f"APPT-{random.randint(1000, 9999)}"
             }
 
+            # Store this offer for potential confirmation in the next turn
+            self.previous_offer = appointment_details
+
             if is_implicit_request:
                 # More empathetic response for symptom-based requests
                 response = (
-                    f"Based on what you've described about your headache, I think it would be good to see a doctor soon. "
+                    f"Based on what you've described, I think it would be good to see a doctor soon. "
                     f"I can offer you an appointment on {date} at {time} with {appointment_details['doctor']}. "
                     f"The appointment will be at {appointment_details['location']}. "
                     f"Would this time work for you, or would you prefer a different day or time?"
@@ -89,7 +115,8 @@ class DummyScheduler:
 
             return {
                 "response": response,
-                "appointment_details": appointment_details
+                "appointment_details": appointment_details,
+                "status": "offered"
             }
         else:
             # Information about scheduling
@@ -98,5 +125,14 @@ class DummyScheduler:
                 f"We have availability from {tomorrow} to {next_week}. "
                 "Would you like me to book an appointment for you? Please let me know what day and time would work best for you."
             )
+
+            # Store a generic appointment offer that will be filled in when confirmed
+            self.previous_offer = {
+                "date": tomorrow,
+                "time": "10:30",
+                "doctor": "Dr. Smith",
+                "location": "Main Clinic, Room 302",
+                "confirmation_code": f"APPT-{random.randint(1000, 9999)}"
+            }
 
             return AIMessage(content=response)
