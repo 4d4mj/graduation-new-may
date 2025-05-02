@@ -71,11 +71,10 @@ async def chat(
             raise HTTPException(400, f"Unknown role {role}")
 
     # 3) PREPARE MINIMAL INPUT
-    input_state = init_state_for_role(role)
-    input_state["messages"] = [HumanMessage(content=payload.message)]  # Only the new message
-    input_state["current_input"] = payload.message  # Add back for guardrails to access original text
-    input_state["user_role"] = role
-    # Removed: input_state["callbacks"] = [StdOutCallbackHandler()]  # This causes serialization issues
+    input_state = {
+    "messages": [HumanMessage(content=payload.message)],
+    "current_input": payload.message,
+        }
 
     # 4) RUN GRAPH - LangGraph handles state restoration and persistence
     try:
