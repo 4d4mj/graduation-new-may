@@ -13,14 +13,12 @@ class MCPToolManager:
 
     def __init__(self, server_configs: Dict[str, Any]):
         """
-        Initializes the manager with server configurations already transformed
-        to the format expected by MultiServerMCPClient.
+        Initializes the manager with server configurations
 
         Args:
-            server_configs (Dict[str, Any]): A dictionary where keys are server names and
-                values are their config dictionaries (e.g., {'transport': 'sse', 'url': '...'})
+            server_configs (Dict[str, Any]): A dictionairy where keys are server names and
+                values are their config dictionairies
         """
-        # The input server_configs are now expected to be pre-transformed
         self._raw_server_configs = server_configs
         self._active_server_configs: Dict[str, Any] = {}
         self._client: Optional[MultiServerMCPClient] = None
@@ -37,20 +35,15 @@ class MCPToolManager:
 
             logger.info("Starting MCP Client")
 
-            # Filter out disabled servers from the already transformed configs
             self._active_server_configs = {
-                name: config.copy()  # Make a copy to avoid modifying the original
+                name: config
                 for name, config in self._raw_server_configs.items()
                 if not config.get("disabled", False)
             }
 
-            # Remove the 'disabled' key before passing to the client, as it's likely not expected
-            for name in self._active_server_configs:
-                 self._active_server_configs[name].pop('disabled', None)
-
             if not self._active_server_configs:
                 logger.warning(
-                    "MCPToolManager: No active MCP servers configured after filtering. Client will not start."
+                    "MCPToolManager: No active MCP servers configured. Client will not start"
                 )
                 self._client = None
                 self._tools = []
@@ -58,45 +51,17 @@ class MCPToolManager:
                 return
 
             try:
-                # --- Simplified Validation ---
-                # The transformation in load_mcp_config should have ensured correctness.
-                # We could add minimal checks here if paranoid, but let's rely on the transformation first.
-                # Example minimal check (optional):
-                for server_name, config in list(self._active_server_configs.items()):
-                    if "transport" not in config:
-                        logger.error(f"Internal Error: Server '{server_name}' config missing 'transport' after transformation. Disabling.")
-                        del self._active_server_configs[server_name]
-                        continue
-                    if config["transport"] == "sse" and "url" not in config:
-                         logger.error(f"Internal Error: SSE Server '{server_name}' config missing 'url' after transformation. Disabling.")
-                         del self._active_server_configs[server_name]
-                         continue
-                    if config["transport"] == "stdio" and "command" not in config:
-                         logger.error(f"Internal Error: Stdio Server '{server_name}' config missing 'command' after transformation. Disabling.")
-                         del self._active_server_configs[server_name]
-                         continue
-
-
-                if not self._active_server_configs:
-                    logger.warning(
-                        "All MCP servers were filtered out due to invalid post-transformation configurations."
-                    )
-                    self._client = None
-                    self._tools = []
-                    self._is_running = False
-                    return
-
                 logger.info(
                     f"Initializing MCP Client with servers: {list(self._active_server_configs.keys())}"
                 )
-                logger.debug(f"Config passed to MultiServerMCPClient: {self._active_server_configs}")
-
-                # --- Initialize client with the CORRECTLY FORMATTED dictionary ---
                 self._client = MultiServerMCPClient(self._active_server_configs)
 
                 await self._client.__aenter__()
                 self._is_running = True
-                logger.info("MCP client connecting...") # Changed log message slightly
+                logger.info("MCP client is starting...")
+
+                await asyncio.sleep(10)
+
                 self._tools = self._client.get_tools()
                 logger.info(
                     f"MCP client started. Tools available: {[t.name for t in self._tools]}"
@@ -104,11 +69,12 @@ class MCPToolManager:
 
                 if not self._tools and self._active_server_configs:
                     logger.warning(
-                        "MCP client started but found no active tools. Check MCP server logs and configurations."
+                        "MCP client started but found no active tools. Check MCP server logs and configurations"
                     )
 
             except Exception as e:
                 logger.error(f"Error starting MCP client: {e}", exc_info=True)
+
                 if self._client:
                     try:
                         await self._client.__aexit__(None, None, None)
@@ -131,7 +97,7 @@ class MCPToolManager:
             logger.info("Stopping MCP client...")
             try:
                 await self._client.__aexit__(None, None, None)
-                logger.info("MCP client stopped successfully")
+                logger.info("MCP clinent stopped succesfully")
             except Exception as e:
                 logger.error(f"Error stopping MCP client {e}", exc_info=True)
             finally:

@@ -1,108 +1,110 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from .config.settings import settings
-from .db.base import get_engine
-from .db.session import get_db_session
 import logging
 
-from app.core.mcp import MCPToolManager
-from app.config.mcp import load_mcp_config
-from app.routes.chat.router import init_graphs
-from app.graphs.sub import agent_node  # Import the module, not the variable
-from app.agents.scheduler.helpers import create_mcp_scheduler_tools
+from app.config.settings import settings
+from app.db.base import get_engine
+from app.db.session import get_db_session
 
-# Set up logging
+# Optional: generic MCP (e.g. Tavily) -------------------------------------------------
+from app.config.mcp import load_mcp_config
+from app.core.mcp import MCPToolManager
+
+# LangGraph orchestration -------------------------------------------------------------
+from app.routes.chat.router import init_graphs
+from app.graphs.sub import agent_node  # import the module, not just the variable
+
+# -------------------------------------------------------------------------------------
+# Logging
+# -------------------------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Database dependency
+
+# -------------------------------------------------------------------------------------
+# FastAPI helpers
+# -------------------------------------------------------------------------------------
 async def get_db():
+    """Yield an async SQLAlchemy session (dependency)."""
     async for session in get_db_session(str(settings.database_url)):
         yield session
 
-# lifespan context manager for FastAPI
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Application startup…")
+    """Application start-up & shutdown hooks."""
+    # ------------------------------------------------------------------ start‑up -----
+    logger.info("Application startup …")
 
-    # --- DATABASE ---
+    # 1️⃣  Database --------------------------------------------------
     engine = await get_engine(str(settings.database_url))
     app.state.engine = engine
     logger.info("DB engine ready")
 
-    # --- MCP TOOL MANAGER ---
-    mcp_server_configs = load_mcp_config()
-    tool_manager = MCPToolManager(mcp_server_configs)
-    app.state.tool_manager = tool_manager
-
-    # Enhanced scheduler tools list - will be populated after MCP client starts
-    enhanced_scheduler_tools = []
-
+    # 2️⃣  MCP tool discovery (optional) -----------------------------
+    mcp_tools = []  # will stay empty if no servers / failure
     try:
-        # Start the MCP client to discover tools
-        await tool_manager.start_client()
-        if tool_manager.is_running:
-            logger.info("MCP Tool Manager started successfully")
-            # Get scheduler MCP tools
-            mcp_tools = tool_manager.get_tools_for_agent([
-                "list_free_slots",
-                "book_appointment",
-                "cancel_appointment"
-            ])
+        mcp_servers = load_mcp_config()
+        if mcp_servers:
+            tool_manager = MCPToolManager(mcp_servers)
+            app.state.tool_manager = tool_manager
+            await tool_manager.start_client()
 
-            # Create enhanced versions of the scheduler tools with better descriptions
-            if mcp_tools:
-                enhanced_scheduler_tools = create_mcp_scheduler_tools(mcp_tools)
-                logger.info(f"Found {len(enhanced_scheduler_tools)} enhanced scheduler tools")
+            if tool_manager.is_running:
+                mcp_tools = tool_manager.get_all_tools()
+                names = [t.name for t in mcp_tools]
+                logger.info(f"MCP client running – discovered tools: {names if names else 'none'}")
             else:
-                logger.warning("No MCP scheduling tools were found!")
+                logger.warning("MCP client not running (no active servers or connection failed)")
         else:
-            logger.error("MCP Tool Manager failed to start")
-    except Exception as e:
-        logger.exception("Critical error starting MCP Tool Manager")
+            logger.info("No MCP servers configured – skipping client startup")
+    except Exception:
+        logger.exception("Unexpected error while initialising MCP client – continuing without MCP tools")
+        # ensure downstream code still works
+        app.state.tool_manager = None
 
-    # Build the medical agent with all tools (base + scheduler)
-    agent_node.medical_agent = agent_node.build_medical_agent(enhanced_scheduler_tools)
+    # 3️⃣  Build medical agent  --------------------------------------
+    agent_node.medical_agent = agent_node.build_medical_agent(mcp_tools)
 
-    # Only verify MCP tools if we expected to have them and they were successfully retrieved
-    if enhanced_scheduler_tools and not any(t.name == "book_appointment" for t in agent_node.medical_agent.tools):
-        logger.warning("Scheduler tools missing from medical_agent despite being available from MCP!")
-        # Don't abort, just log a warning and continue with base tools
-
-    # Initialize graphs for both patient and doctor roles - AFTER agent is fully built
+    # 4️⃣  Compile LangGraph graphs ----------------------------------
     app.state.graphs = init_graphs()
-    logger.info(f"Initialized graphs for roles: {list(app.state.graphs.keys())}")
+    logger.info(f"Graphs initialised for roles: {list(app.state.graphs.keys())}")
 
-    # give control back to FastAPI…
+    # ------------------------------------------------ give control back
     yield
 
-    # --- SHUTDOWN SEQUENCE (reverse order) ---
-    logger.info("Application shutdown…")
+    # ------------------------------------------------ shutdown --------
+    logger.info("Application shutdown …")
 
-    if hasattr(app.state, "tool_manager") and app.state.tool_manager.is_running:
+    # Stop MCP client first (if any)
+    if (tm := getattr(app.state, "tool_manager", None)) and tm.is_running:
         try:
-            await app.state.tool_manager.stop_client()
-            logger.info("MCP Tool Manager stopped")
+            await tm.stop_client()
+            logger.info("MCP client stopped")
         except Exception:
-            logger.exception("Error stopping MCP Tool Manager")
-    else:
-        logger.info("No running MCP Tool Manager to stop")
+            logger.exception("Error stopping MCP client")
 
-    if hasattr(app.state, "engine"):
+    # Dispose DB engine
+    if (eng := getattr(app.state, "engine", None)):
         try:
-            await app.state.engine.dispose()
-            logger.info("Database engine disposed")
+            await eng.dispose()
+            logger.info("DB engine disposed")
         except Exception:
-            logger.exception("Error disposing database engine")
+            logger.exception("Error disposing DB engine")
 
     logger.info("Shutdown complete")
 
-app = FastAPI(title="MultiAgent Medical Assistant", lifespan=lifespan)
 
-# Configure CORS
+# -------------------------------------------------------------------------------------
+# FastAPI application instance
+# -------------------------------------------------------------------------------------
+app = FastAPI(title="Multi‑Agent Medical Assistant", lifespan=lifespan)
+
+# CORS -------------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[str(o) for o in settings.cors_origins],
@@ -111,32 +113,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# health check
+
+# ----------------------------------------------------------------- health‑check -----
 @app.get("/health")
 async def health_check(request: Request):
-    """basic health check endpoint"""
-    tool_manager_status = "stopped"
+    tool_mgr_state = "stopped"
+    if tm := getattr(request.app.state, "tool_manager", None):
+        tool_mgr_state = "running" if tm.is_running else "stopped"
+
     graphs_status = {}
-
-    if hasattr(request.app.state, "tool_manager"):
-        tool_manager_status = (
-            "running" if request.app.state.tool_manager.is_running else "stopped"
-        )
-
-    if hasattr(request.app.state, "graphs"):
-        for role, graph in request.app.state.graphs.items():
-            graphs_status[role] = "loaded" if graph is not None else "not loaded"
+    if graphs := getattr(request.app.state, "graphs", None):
+        graphs_status = {role: "loaded" if g else "not loaded" for role, g in graphs.items()}
 
     return {
         "status": "ok",
-        "mcp_client": tool_manager_status,
+        "mcp_client": tool_mgr_state,
         "graphs": graphs_status,
     }
 
-from app.routes.auth.router import router as auth_router
-from app.routes.chat.router import router as chat_router
+
+# ------------------------------------------------------------------- routes ---------
+from app.routes.auth.router import router as auth_router  # noqa: E402  (after app creation)
+from app.routes.chat.router import router as chat_router  # noqa: E402
+
 app.include_router(auth_router)
 app.include_router(chat_router)
-
-
-
