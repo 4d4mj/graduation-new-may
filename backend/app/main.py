@@ -7,20 +7,22 @@ from app.config.settings import settings
 from app.db.base import get_engine
 from app.db.session import get_db_session, get_session_factory
 from app.graphs.patient import create_patient_graph
+from app.graphs.doctor import create_doctor_graph
 
 # Optional: generic MCP (e.g. Tavily) -------------------------------------------------
 from app.config.mcp import load_mcp_config
 from app.core.mcp import MCPToolManager
 
 # LangGraph orchestration -------------------------------------------------------------
-from app.graphs.sub import agent_node  # import the module, not just the variable
+from app.graphs.sub import patient_agent
+from app.graphs.sub import doctor_agent
 from langgraph.checkpoint.memory import MemorySaver
 
 # -------------------------------------------------------------------------------------
 # Logging
 # -------------------------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -38,7 +40,11 @@ def init_graphs():
     """Initialize the graphs for each role with checkpointers."""
     patient_checkpointer = MemorySaver()  # Explicitly set state_class to dict
     patient_graph = create_patient_graph().compile(debug=True, checkpointer=patient_checkpointer)
-    role_graphs = {"patient": patient_graph}
+    doctor_graph = create_doctor_graph().compile(debug=True, checkpointer=patient_checkpointer)
+    role_graphs = {
+        "patient": patient_graph,
+        "doctor": doctor_graph
+        }
     return role_graphs
 
 
@@ -79,7 +85,8 @@ async def lifespan(app: FastAPI):
     #     app.state.tool_manager = None
 
     # 3️⃣  Build medical agent  --------------------------------------
-    agent_node.medical_agent = agent_node.build_medical_agent(mcp_tools)
+    patient_agent.medical_agent = patient_agent.build_medical_agent(mcp_tools)
+    doctor_agent.medical_agent = patient_agent.build_medical_agent(mcp_tools)
 
     # 4️⃣  Compile LangGraph graphs ----------------------------------
     app.state.graphs = init_graphs()

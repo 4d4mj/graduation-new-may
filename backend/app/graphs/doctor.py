@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from app.agents.guardrails import guard_in, guard_out
-from app.agents.states import PatientState
-from app.graphs.sub import patient_agent
+from app.agents.states import DoctorState
+from app.graphs.sub import doctor_agent
 import logging
 from typing import Literal  # <-- Import Literal
 
@@ -23,9 +23,9 @@ def route_after_guard_in(state: dict) -> Literal["agent", "__end__"]:
 # --- END ADDITION ---
 
 
-def create_patient_graph() -> StateGraph:
+def create_doctor_graph() -> StateGraph:
     """
-    Create a streamlined patient orchestrator graph using the prebuilt React agent approach.
+    Create a streamlined doctor orchestrator graph using the prebuilt React agent approach.
 
     Flow:
     1. Apply input guardrails
@@ -34,13 +34,13 @@ def create_patient_graph() -> StateGraph:
     4. Apply output guardrails
 
     Returns:
-        A compiled patient StateGraph
+        A compiled doctor StateGraph
     """
-    g = StateGraph(PatientState)
+    g = StateGraph(DoctorState)
 
     # Add nodes
     g.add_node("guard_in", guard_in)
-    g.add_node("agent", patient_agent.medical_agent.ainvoke)
+    g.add_node("agent", doctor_agent.medical_agent.ainvoke)
     g.add_node("guard_out", guard_out)
 
     # Set entry point
@@ -61,5 +61,5 @@ def create_patient_graph() -> StateGraph:
     g.add_edge("agent", "guard_out")
     g.add_edge("guard_out", END)
 
-    logger.info("Patient graph created with conditional routing after input guardrail.")
+    logger.info("Doctor graph created with conditional routing after input guardrail.")
     return g

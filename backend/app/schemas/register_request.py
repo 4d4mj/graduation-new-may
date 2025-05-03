@@ -4,7 +4,7 @@ from typing    import Optional, Annotated
 from datetime  import date
 
 from app.schemas.shared import (
-    Role, Sex, PatientIn, DoctorIn
+    Role, PatientIn, DoctorIn
 )
 
 
