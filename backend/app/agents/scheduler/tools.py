@@ -8,10 +8,11 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, date, time, timezone
 from typing import Optional
-from fastapi import Cookie, Depends, HTTPException, status
 
 from langchain_core.tools import tool
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import Annotated
+from langgraph.prebuilt import InjectedState
 
 # Import the CRUD functions and session utility
 from app.db.crud.appointment import (
@@ -27,8 +28,6 @@ from app.db.crud.doctor import (
 )
 from app.db.session import get_db_session
 from app.config.settings import settings
-from app.core.auth import decode_access_token
-from jose import JWTError
 
 logger = logging.getLogger(__name__)
 
@@ -95,41 +94,6 @@ def parse_datetime_str(datetime_str: str) -> datetime | None:
         logger.error(f"Unexpected error parsing datetime '{datetime_str}': {str(e)}")
         return None
 
-# Helper to extract user ID from the session token
-async def get_user_id_from_token(session: str = None) -> int | None:
-    """
-    Extract user ID from session token.
-
-    Args:
-        session (str): JWT session token
-
-    Returns:
-        int | None: User ID if token valid, None otherwise
-    """
-    if not session:
-        logger.warning("No session token provided")
-        return None
-
-    try:
-        payload = decode_access_token(session)
-        if "sub" not in payload:
-            logger.warning("Token payload does not contain 'sub' field")
-            return None
-
-        # The 'sub' field contains the user ID
-        user_id = int(payload["sub"])
-        logger.info(f"Extracted user ID {user_id} from token")
-        return user_id
-    except JWTError as e:
-        logger.error(f"Failed to decode JWT token: {e}")
-        return None
-    except (ValueError, TypeError) as e:
-        logger.error(f"Invalid user ID format in token: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error extracting user ID from token: {e}")
-        return None
-
 # ------------------------------------------------------------------ tools
 @tool("list_free_slots", return_direct=False)
 async def list_free_slots(doctor_name: Optional[str] = None, day: str | None = None) -> str:
@@ -164,33 +128,9 @@ async def list_free_slots(doctor_name: Optional[str] = None, day: str | None = N
                     doctor_name_display = f"Dr. {doctor.first_name} {doctor.last_name}"
                     logger.info(f"Found doctor: {doctor_name_display} (ID: {doctor_id})")
                 else:
-                    logger.warning(f"Doctor with name '{doctor_name}' not found. Using default doctor.")
-
-                    # Check if we have the default doctor available
-                    default_doctor = await get_doctor_details_by_user_id(db, default_doctor_id)
-                    if default_doctor:
-                        doctor_id = default_doctor_id
-                        doctor_name_display = f"Dr. {default_doctor.first_name} {default_doctor.last_name}"
-                        logger.info(f"Using default doctor: {doctor_name_display} (ID: {doctor_id})")
-                    else:
-                        return f"Sorry, I couldn't find a doctor named '{doctor_name}' and the default doctor is also unavailable."
+                    logger.warning(f"Doctor with name '{doctor_name}' not found.")
             else:
-                # No name provided, use default doctor
-                default_doctor = await get_doctor_details_by_user_id(db, default_doctor_id)
-                if default_doctor:
-                    doctor_id = default_doctor_id
-                    doctor_name_display = f"Dr. {default_doctor.first_name} {default_doctor.last_name}"
-                    logger.info(f"Using default doctor: {doctor_name_display} (ID: {doctor_id})")
-                else:
-                    # List available doctors if default is not found
-                    doctors = await list_all_doctors(db)
-                    if doctors:
-                        doctor = doctors[0]  # Take the first available doctor
-                        doctor_id = doctor.user_id
-                        doctor_name_display = f"Dr. {doctor.first_name} {doctor.last_name}"
-                        logger.info(f"Using first available doctor: {doctor_name_display} (ID: {doctor_id})")
-                    else:
-                        return "Sorry, I couldn't find any available doctors in the system."
+               return "Sorry, I don't have the doctor id."
 
             # At this point, we should have a valid doctor_id
             if doctor_id:
@@ -226,27 +166,25 @@ async def list_free_slots(doctor_name: Optional[str] = None, day: str | None = N
 async def book_appointment(
     doctor_name: str,
     starts_at: str,
-    session: str = None,
+    patient_id: Annotated[int, InjectedState("user_id")],
     duration_minutes: int = 30,
     location: str = "Main Clinic",
     notes: str | None = None,
 ) -> str:
     """
     Books a new appointment for the current user with a doctor at a given start time and duration.
-    Returns a confirmation or error message. User ID is automatically extracted from the session token.
+    Returns a confirmation or error message.
 
     Args:
         doctor_name (str): The name of the doctor to book with.
         starts_at (str): The desired start time in ISO format (e.g., "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DDTHH:MM:SSZ"). Assumed UTC if no timezone.
-        session (str): The session token containing the user ID. Will be automatically provided by the system.
+        patient_id (str): The ID of the patient to book for.
         duration_minutes (int): The duration of the appointment in minutes (default 30).
         location (str): The location of the appointment (default "Main Clinic").
         notes (str | None): Optional notes for the appointment.
     """
     logger.info(f"Tool 'book_appointment' called: doctor_name='{doctor_name}', start='{starts_at}'")
 
-    # Extract patient_id from session token
-    patient_id = await get_user_id_from_token(session)
     if not patient_id:
         logger.error("Failed to extract patient_id from session token")
         return "I couldn't identify you from your session. Please log in again."
@@ -320,19 +258,18 @@ async def book_appointment(
 @tool("cancel_appointment", return_direct=False)
 async def cancel_appointment(
     appointment_id: int,
-    session: str = None
+    patient_id: Annotated[int, InjectedState("user_id")],
 ) -> str:
     """
-    Cancels an existing appointment by its ID. User ID is automatically extracted from the session token.
+    Cancels an existing appointment by its ID.
 
     Args:
         appointment_id (int): The unique ID of the appointment to cancel.
-        session (str): The session token containing the user ID. Will be automatically provided by the system.
+        patient_id (str): The ID of the patient to cancel the appointment for.
     """
     logger.info(f"Tool 'cancel_appointment' called for appointment {appointment_id}")
 
-    # Extract patient_id from session token
-    patient_id = await get_user_id_from_token(session)
+
     if not patient_id:
         logger.error("Failed to extract patient_id from session token")
         return "I couldn't identify you from your session. Please log in again."

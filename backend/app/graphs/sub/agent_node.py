@@ -1,4 +1,4 @@
-from langchain_core.tools import StructuredTool, BaseTool, Tool
+from langchain_core.tools import BaseTool
 from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
@@ -6,28 +6,24 @@ from app.config.settings import settings
 from app.agents.tools import (
     rag_query,
     web_search,
-    small_talk,
-    # Import the already structured tools directly
-    list_slots_tool,
-    book_appointment_tool,
-    cancel_appointment_tool
+    small_talk
 )
-from typing import Sequence, List, Dict, Any
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
+from app.agents.states import PatientState
+
+from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment
+from typing import Sequence
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Define base tools that are always available
-# Convert async tools to properly handled Tool objects
 BASE_TOOLS = [
     rag_query,
     web_search,
     small_talk,
-    # Use the pre-wrapped tools directly
-    list_slots_tool,
-    book_appointment_tool,
-    cancel_appointment_tool,
+    list_free_slots,
+    book_appointment,
+    cancel_appointment
 ]
 
 ASSISTANT_SYSTEM_PROMPT = """You are a professional, empathetic medical assistant AI.
@@ -82,25 +78,6 @@ Workflow for Booking:
 6. Report the success or failure message from the tool back to the user.
 """
 
-# Helper function to ensure proper message formatting for Gemini
-def ensure_proper_gemini_message_format(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Ensures message history is in the proper format for Gemini.
-    Gemini requires that the last message in the conversation be from the user.
-    """
-    if not messages:
-        return messages
-
-    # Check if the last message is already a user message
-    last_message = messages[-1]
-    if isinstance(last_message, HumanMessage) or (hasattr(last_message, "type") and last_message.type == "human"):
-        return messages
-
-    # If the last message is not from the user, we need to add a temporary user message
-    # This is a workaround for Gemini's requirements
-    logger.debug("Adding placeholder message to comply with Gemini requirements")
-    return messages + [HumanMessage(content="Continue the conversation based on what we've discussed.")]
-
 def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):
     """
     Build a React agent for medical assistance using LangGraph prebuilt components.
@@ -119,7 +96,7 @@ def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):
             temperature=0.7
         )
 
-        # Combine base tools with extra tools (typically MCP scheduling tools)
+        # Combine base tools with extra tools
         tools = list(BASE_TOOLS) + list(extra_tools)
 
         # Log the tools being used
@@ -131,7 +108,8 @@ def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):
             model=model,
             tools=tools,
             prompt=ASSISTANT_SYSTEM_PROMPT,
-            debug=False,
+            state_schema=PatientState,
+            debug=True,
             version="v1"
         )
 

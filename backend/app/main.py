@@ -6,14 +6,15 @@ import logging
 from app.config.settings import settings
 from app.db.base import get_engine
 from app.db.session import get_db_session
+from app.graphs.patient import create_patient_graph
 
 # Optional: generic MCP (e.g. Tavily) -------------------------------------------------
 from app.config.mcp import load_mcp_config
 from app.core.mcp import MCPToolManager
 
 # LangGraph orchestration -------------------------------------------------------------
-from app.routes.chat.router import init_graphs
 from app.graphs.sub import agent_node  # import the module, not just the variable
+from langgraph.checkpoint.memory import MemorySaver
 
 # -------------------------------------------------------------------------------------
 # Logging
@@ -32,6 +33,13 @@ async def get_db():
     """Yield an async SQLAlchemy session (dependency)."""
     async for session in get_db_session(str(settings.database_url)):
         yield session
+
+def init_graphs():
+    """Initialize the graphs for each role with checkpointers."""
+    patient_checkpointer = MemorySaver()  # Explicitly set state_class to dict
+    patient_graph = create_patient_graph().compile(checkpointer=patient_checkpointer)
+    role_graphs = {"patient": patient_graph}
+    return role_graphs
 
 
 @asynccontextmanager
