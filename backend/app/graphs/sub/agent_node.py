@@ -3,12 +3,14 @@ from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
 # ── built‑in tools
-from app.agents.tools import rag_query, web_search, small_talk
-# ── new scheduler tools
-from app.agents.scheduler.tools import (
-    list_free_slots,
-    book_appointment,
-    cancel_appointment,
+from app.agents.tools import (
+    rag_query,
+    web_search,
+    small_talk,
+    # Import the already structured tools directly
+    list_slots_tool,
+    book_appointment_tool,
+    cancel_appointment_tool
 )
 from typing import Sequence, List, Dict, Any
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -22,28 +24,10 @@ BASE_TOOLS = [
     rag_query,
     web_search,
     small_talk,
-    # Correctly wrap async functions as Tool objects with coroutine handling
-    Tool.from_function(
-        func=list_free_slots,
-        name="list_free_slots",
-        description=list_free_slots.__doc__,
-        coroutine=list_free_slots,  # This is critical for async functions
-        return_direct=False
-    ),
-    Tool.from_function(
-        func=book_appointment,
-        name="book_appointment",
-        description=book_appointment.__doc__,
-        coroutine=book_appointment,
-        return_direct=False
-    ),
-    Tool.from_function(
-        func=cancel_appointment,
-        name="cancel_appointment",
-        description=cancel_appointment.__doc__,
-        coroutine=cancel_appointment,
-        return_direct=False
-    ),
+    # Use the pre-wrapped tools directly
+    list_slots_tool,
+    book_appointment_tool,
+    cancel_appointment_tool,
 ]
 
 ASSISTANT_SYSTEM_PROMPT = """You are a professional, empathetic medical assistant AI.
@@ -69,39 +53,33 @@ SPECIAL INSTRUCTIONS FOR FOLLOW-UPS:
 
 SCHEDULING TOOLS:
 - Use `list_free_slots` to find available appointment times for a specific doctor.
-    - **Requires** `doctor_id` (the user ID of the doctor). Ask the user which doctor they want to see if not specified.
     - Parameters:
-        - doctor_id (int): The user ID of the doctor.
+        - doctor_name (str, optional): The name of the doctor you want to check availability for.
         - day (str, optional): Date in YYYY-MM-DD format (defaults to tomorrow).
-    - Example: list_free_slots(doctor_id=2, day="2024-07-15")
+    - Example: list_free_slots(doctor_name="John", day="2024-07-15")
 
 - Use `book_appointment` to create a new appointment *after* confirming a slot with the user.
-    - **Requires** `patient_id` (the user ID of the patient making the request).
-    - **Requires** `doctor_id` (the user ID of the doctor).
+    - **Requires** `doctor_name` (the name of the doctor).
     - **Requires** `starts_at` (the exact start datetime in UTC ISO format, e.g., "YYYY-MM-DDTHH:MM:SSZ" or "YYYY-MM-DDTHH:MM:SS").
     - Parameters:
-        - patient_id (int): User ID of the patient.
-        - doctor_id (int): User ID of the doctor.
+        - doctor_name (str): Name of the doctor.
         - starts_at (str): Full start datetime string (ISO format, UTC).
         - duration_minutes (int, optional): Default 30.
         - location (str, optional): Default "Main Clinic".
         - notes (str, optional): Reason for visit.
-    - Example: book_appointment(patient_id=1, doctor_id=2, starts_at="2024-07-15T10:30:00Z", notes="Follow-up check")
+    - Example: book_appointment(doctor_name="John", starts_at="2024-07-15T10:30:00Z", notes="Neck pain")
 
 - Use `cancel_appointment` to cancel an existing appointment.
     - **Requires** `appointment_id` (the ID of the appointment itself).
-    - **Requires** `patient_id` (the user ID of the patient who booked it).
-    - Example: cancel_appointment(appointment_id=123, patient_id=1)
+    - Example: cancel_appointment(appointment_id=123)
 
 Workflow for Booking:
-1. Ask the user which doctor (by name or specialty if possible, you might need another tool later to find doctor IDs by name) they want to see and for which day.
-2. Use `list_free_slots` with the correct `doctor_id` and `day`.
+1. Ask the user which doctor they want to see and for which day.
+2. Use `list_free_slots` with the doctor's name and day.
 3. Present the available slots (e.g., "Dr. Adams has slots at 10:00, 11:30...")
 4. Ask the user to choose a specific time.
-5. Once confirmed, use `book_appointment`, ensuring you provide the correct `patient_id` (user's ID), `doctor_id`, and the full `starts_at` ISO string (combining date and time).
+5. Once confirmed, use `book_appointment` with the doctor's name and the full `starts_at` ISO string (combining date and time).
 6. Report the success or failure message from the tool back to the user.
-
-If you don't know the patient_id or doctor_id, you MUST ask the user for it before calling book_appointment or cancel_appointment.
 """
 
 # Helper function to ensure proper message formatting for Gemini

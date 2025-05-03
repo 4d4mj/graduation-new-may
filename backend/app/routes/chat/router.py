@@ -79,7 +79,7 @@ async def chat(
     # ⚠️ FIXED: Retrieve previous messages and append instead of overwriting
     prev_messages = []
     try:
-        prev_state = await graph.checkpointer.get(thread_id)
+        prev_state = await graph.checkpointer.get({"configurable": {"thread_id": thread_id}})
         if prev_state:
             if isinstance(prev_state, dict):
                 prev_messages = prev_state.get("messages", [])
@@ -200,7 +200,7 @@ async def chat(
         try:
             checkpointer = graph.checkpointer
             if hasattr(checkpointer, 'get'):
-                saved = await checkpointer.get(thread_id)
+                saved = await checkpointer.get({"configurable": {"thread_id": thread_id}})
                 if saved:
                     logger.info(f"[MEMORY] STATE SAVED SUCCESSFULLY: {thread_id}")
                     saved_messages = saved.get("messages", [])

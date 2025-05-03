@@ -37,7 +37,7 @@ def create_patient_graph() -> StateGraph:
     # Add nodes for guardrails and the unified agent
     g.add_node("guard_in", apply_input_guardrails)
     g.add_node("format_messages", format_messages_node)
-    g.add_node("agent", agent_node.medical_agent.invoke)  # React agent handles all capabilities
+    g.add_node("agent", agent_node.medical_agent.ainvoke)  # Changed to async invoke to handle async tools
     g.add_node("apply_out", apply_output_guardrails)
 
     # Updated flow to include message formatting
