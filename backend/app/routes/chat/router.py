@@ -35,10 +35,14 @@ async def chat(
     # Create a fresh input state with what we need for this turn
     input_state = init_state_for_role(role)
 
-    # Set the current input from the user
+    # Set the current input from the user and reset volatile fields
     input_state["user_id"] = int(user_id)
     input_state["current_input"] = payload.message
     input_state["messages"] = [HumanMessage(content=payload.message)]
+    input_state["final_output"] = None  # clear anything saved last turn
+    input_state["agent_name"] = None
+
+    # don't touch messages – let LangGraph's checkpoint supply full history
 
     try:
         # invoke the graph with the input state
@@ -57,7 +61,10 @@ async def chat(
     if not reply:
         reply = "I apologize, but I couldn't process your request. Please try again later."
 
-    agent_name = final_state.get("agent_name", "Unknown Agent")
+    agent_name = final_state.get("agent_name")
+    if agent_name is None:
+        agent_name = "medical_assistant"  # Provide a default value to pass validation
+        logger.warning("No agent_name was set in final state, using default: %s", agent_name)
 
     # Build history for response (keeping client-side synchronized)
     response_messages = []

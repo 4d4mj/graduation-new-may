@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
@@ -33,6 +33,13 @@ def _check(prompt_template: PromptTemplate, text: str) -> bool:
     verdict = chain.invoke({"text": text})
     return verdict.startswith("SAFE")
 
+def _extract_last_reply(state: dict) -> str:
+    """Return content of the last AI/Tool message, or ''."""
+    for m in reversed(state.get("messages", [])):
+        if isinstance(m, (AIMessage, ToolMessage)):
+            return m.content or ""
+    return ""
+
 # ─────────────────────────────────────────────────────────────────────────
 # 2.  Runnable nodes — each returns **a NEW state dict**
 # ─────────────────────────────────────────────────────────────────────────
@@ -50,8 +57,13 @@ def guard_in(state: dict) -> dict:
 
 def guard_out(state: dict) -> dict:
     """Sanitise assistant answer."""
-    txt = state.get("final_output", "")
+    # NEW – ignore whatever was in final_output, take the freshest reply
+    txt = _extract_last_reply(state)
+    if not txt:
+        return state          # agent produced nothing
+
     if not _check(output_prompt, txt):
         txt = "I'm sorry, I can't share that."
+
     state["final_output"] = txt
     return state
