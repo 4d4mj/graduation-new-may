@@ -1,17 +1,17 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import get_engine, get_session_factory
 from typing import Callable, AsyncGenerator
+from fastapi import Request
 
 # Session dependency
-async def get_db_session(database_url: str) -> AsyncGenerator[AsyncSession, None]:
+async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """
-    Create and yield a database session
+    Create and yield a database session using the shared engine
     This will be used as a FastAPI dependency
     """
-    engine = await get_engine(database_url)
-    session_factory = await get_session_factory(engine)
+    async_session = request.app.state.session_factory
 
-    async with session_factory() as session:
+    async with async_session() as session:
         try:
             yield session
         finally:

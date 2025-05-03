@@ -14,8 +14,6 @@ class BaseAgentState(MessagesState):
 
 class PatientState(BaseAgentState):
     # ─── patient-only fields ──────────────────────────────────
-    retrieval_confidence: float    = 0.0
-    insufficient_info:    bool     = False
     request_scheduling:   bool     = False
     next_agent:           str | None = None
     # Required by LangGraph's React agent

@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, END
-from app.agents.guardrails.nodes import apply_input_guardrails, apply_output_guardrails
+# from app.agents.guardrails.nodes import apply_input_guardrails, apply_output_guardrails
+from app.agents.guardrails import guard_in, guard_out
 from app.agents.states import PatientState
 from app.graphs.sub import agent_node
 import logging
@@ -24,14 +25,15 @@ def create_patient_graph() -> StateGraph:
     g = StateGraph(PatientState)
 
     # Add nodes for guardrails and the unified agent
-    g.add_node("guard_in", apply_input_guardrails)
+    g.add_node("guard_in", guard_in)
     g.add_node("agent", agent_node.medical_agent.ainvoke)
-    g.add_node("apply_out", apply_output_guardrails)
+    g.add_node("guard_out", guard_out)
 
-    # Updated flow to include message formatting
+    # Updated flow with correct node names
     g.set_entry_point("guard_in")
-    g.add_edge("agent", "apply_out")
-    g.add_edge("apply_out", END)
+    g.add_edge("guard_in", "agent")
+    g.add_edge("agent", "guard_out")
+    g.add_edge("guard_out", END)
 
     logger.info("Patient graph created with unified medical agent architecture and Gemini compatibility")
     return g

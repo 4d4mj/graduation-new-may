@@ -1,7 +1,8 @@
 import logging
 from fastapi import APIRouter, HTTPException, Cookie, Request
-
+from langchain.callbacks import StdOutCallbackHandler
 from app.config.settings import env
+from langchain_core.messages import HumanMessage
 from app.agents.states import init_state_for_role
 from app.core.auth import decode_access_token
 from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
@@ -37,10 +38,13 @@ async def chat(
     # Set the current input from the user
     input_state["user_id"] = int(user_id)
     input_state["current_input"] = payload.message
+    input_state["messages"] = [HumanMessage(content=payload.message)]
 
     try:
         # invoke the graph with the input state
-        final_state = await graph.ainvoke(input_state, config={"configurable": {"thread_id": session}})
+        final_state = await graph.ainvoke(input_state, config={"configurable": {"thread_id": session},
+                                                               "callbacks": [StdOutCallbackHandler()]
+                                                               })
 
     except Exception as e:
         logger.exception("Error running graph")

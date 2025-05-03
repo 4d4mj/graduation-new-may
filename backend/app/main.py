@@ -5,7 +5,7 @@ import logging
 
 from app.config.settings import settings
 from app.db.base import get_engine
-from app.db.session import get_db_session
+from app.db.session import get_db_session, get_session_factory
 from app.graphs.patient import create_patient_graph
 
 # Optional: generic MCP (e.g. Tavily) -------------------------------------------------
@@ -29,15 +29,15 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------------------------------------------
 # FastAPI helpers
 # -------------------------------------------------------------------------------------
-async def get_db():
+async def get_db(request: Request):
     """Yield an async SQLAlchemy session (dependency)."""
-    async for session in get_db_session(str(settings.database_url)):
+    async for session in get_db_session(request):
         yield session
 
 def init_graphs():
     """Initialize the graphs for each role with checkpointers."""
     patient_checkpointer = MemorySaver()  # Explicitly set state_class to dict
-    patient_graph = create_patient_graph().compile(checkpointer=patient_checkpointer)
+    patient_graph = create_patient_graph().compile(debug=True, checkpointer=patient_checkpointer)
     role_graphs = {"patient": patient_graph}
     return role_graphs
 
@@ -51,29 +51,32 @@ async def lifespan(app: FastAPI):
     # 1️⃣  Database --------------------------------------------------
     engine = await get_engine(str(settings.database_url))
     app.state.engine = engine
-    logger.info("DB engine ready")
+
+    # Create and store session factory
+    app.state.session_factory = await get_session_factory(engine)
+    logger.info("DB engine and session factory ready")
 
     # 2️⃣  MCP tool discovery (optional) -----------------------------
     mcp_tools = []  # will stay empty if no servers / failure
-    try:
-        mcp_servers = load_mcp_config()
-        if mcp_servers:
-            tool_manager = MCPToolManager(mcp_servers)
-            app.state.tool_manager = tool_manager
-            await tool_manager.start_client()
+    # try:
+    #     mcp_servers = load_mcp_config()
+    #     if mcp_servers:
+    #         tool_manager = MCPToolManager(mcp_servers)
+    #         app.state.tool_manager = tool_manager
+    #         await tool_manager.start_client()
 
-            if tool_manager.is_running:
-                mcp_tools = tool_manager.get_all_tools()
-                names = [t.name for t in mcp_tools]
-                logger.info(f"MCP client running – discovered tools: {names if names else 'none'}")
-            else:
-                logger.warning("MCP client not running (no active servers or connection failed)")
-        else:
-            logger.info("No MCP servers configured – skipping client startup")
-    except Exception:
-        logger.exception("Unexpected error while initialising MCP client – continuing without MCP tools")
-        # ensure downstream code still works
-        app.state.tool_manager = None
+    #         if tool_manager.is_running:
+    #             mcp_tools = tool_manager.get_all_tools()
+    #             names = [t.name for t in mcp_tools]
+    #             logger.info(f"MCP client running – discovered tools: {names if names else 'none'}")
+    #         else:
+    #             logger.warning("MCP client not running (no active servers or connection failed)")
+    #     else:
+    #         logger.info("No MCP servers configured – skipping client startup")
+    # except Exception:
+    #     logger.exception("Unexpected error while initialising MCP client – continuing without MCP tools")
+    #     # ensure downstream code still works
+    #     app.state.tool_manager = None
 
     # 3️⃣  Build medical agent  --------------------------------------
     agent_node.medical_agent = agent_node.build_medical_agent(mcp_tools)

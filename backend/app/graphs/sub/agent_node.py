@@ -1,25 +1,22 @@
 from langchain_core.tools import BaseTool
 from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage
 from app.config.settings import settings
 # ── built‑in tools
 from app.agents.tools import (
-    rag_query,
-    web_search,
     small_talk
 )
 
 from app.agents.states import PatientState
 
 from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment
-from typing import Sequence
+from typing import Sequence, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
 
 BASE_TOOLS = [
-    rag_query,
-    web_search,
     small_talk,
     list_free_slots,
     book_appointment,
@@ -29,14 +26,10 @@ BASE_TOOLS = [
 ASSISTANT_SYSTEM_PROMPT = """You are a professional, empathetic medical assistant AI.
 
 YOUR CAPABILITIES:
-1. Answer medical questions using trusted medical databases (rag_query)
-2. Search the web for recent medical information (web_search)
-3. Help patients schedule appointments with scheduling tools
-4. Engage in general conversation (small_talk)
+1. Help patients schedule appointments with scheduling tools
+2. Engage in general conversation (small_talk)
 
 GUIDELINES:
-- For medical questions, prioritize using rag_query for reliable information
-- If you need recent or supplementary information, use web_search
 - For any symptoms described as severe or concerning, suggest scheduling an appointment
 - Always be respectful, clear, and empathetic
 - Keep responses concise and focused on the patient's needs
