@@ -1,11 +1,12 @@
 import logging
 from typing import Dict, Any, Union
-from langchain_core.tools import tool
+from langchain_core.tools import tool, Tool
 from langchain_core.messages import AIMessage
 
 from app.agents.rag.core import DummyRAG
 from app.agents.web_search.core import DummyWebSearch
-# Removed import for DummyScheduler
+# Import the scheduler tools instead of using DummyScheduler
+from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment
 from app.config.agent import settings as agentSettings
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,31 @@ def web_search(query: str) -> str:
     result = web.process_web_search_results(query)
     return result.content if hasattr(result, "content") else str(result)
 
-# Removed the schedule_appointment tool that used DummyScheduler
+# Properly configure the scheduler tools with Tool.from_function
+# This is the correct way to expose async tools to LangChain
+list_slots_tool = Tool.from_function(
+    func=list_free_slots,
+    name="list_free_slots",
+    description=list_free_slots.__doc__,
+    coroutine=list_free_slots,
+    return_direct=False
+)
+
+book_appointment_tool = Tool.from_function(
+    func=book_appointment,
+    name="book_appointment",
+    description=book_appointment.__doc__,
+    coroutine=book_appointment,
+    return_direct=False
+)
+
+cancel_appointment_tool = Tool.from_function(
+    func=cancel_appointment,
+    name="cancel_appointment",
+    description=cancel_appointment.__doc__,
+    coroutine=cancel_appointment,
+    return_direct=False
+)
 
 @tool("small_talk", return_direct=True)
 def small_talk(user_message: str) -> str:

@@ -1,4 +1,4 @@
-from langchain_core.tools import StructuredTool, BaseTool
+from langchain_core.tools import StructuredTool, BaseTool, Tool
 from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
@@ -10,19 +10,40 @@ from app.agents.scheduler.tools import (
     book_appointment,
     cancel_appointment,
 )
-from typing import Sequence
+from typing import Sequence, List, Dict, Any
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 import logging
 
 logger = logging.getLogger(__name__)
 
 # Define base tools that are always available
+# Convert async tools to properly handled Tool objects
 BASE_TOOLS = [
     rag_query,
     web_search,
     small_talk,
-    list_free_slots,
-    book_appointment,
-    cancel_appointment,
+    # Correctly wrap async functions as Tool objects with coroutine handling
+    Tool.from_function(
+        func=list_free_slots,
+        name="list_free_slots",
+        description=list_free_slots.__doc__,
+        coroutine=list_free_slots,  # This is critical for async functions
+        return_direct=False
+    ),
+    Tool.from_function(
+        func=book_appointment,
+        name="book_appointment",
+        description=book_appointment.__doc__,
+        coroutine=book_appointment,
+        return_direct=False
+    ),
+    Tool.from_function(
+        func=cancel_appointment,
+        name="cancel_appointment",
+        description=cancel_appointment.__doc__,
+        coroutine=cancel_appointment,
+        return_direct=False
+    ),
 ]
 
 ASSISTANT_SYSTEM_PROMPT = """You are a professional, empathetic medical assistant AI.
@@ -82,6 +103,25 @@ Workflow for Booking:
 
 If you don't know the patient_id or doctor_id, you MUST ask the user for it before calling book_appointment or cancel_appointment.
 """
+
+# Helper function to ensure proper message formatting for Gemini
+def ensure_proper_gemini_message_format(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Ensures message history is in the proper format for Gemini.
+    Gemini requires that the last message in the conversation be from the user.
+    """
+    if not messages:
+        return messages
+
+    # Check if the last message is already a user message
+    last_message = messages[-1]
+    if isinstance(last_message, HumanMessage) or (hasattr(last_message, "type") and last_message.type == "human"):
+        return messages
+
+    # If the last message is not from the user, we need to add a temporary user message
+    # This is a workaround for Gemini's requirements
+    logger.debug("Adding placeholder message to comply with Gemini requirements")
+    return messages + [HumanMessage(content="Continue the conversation based on what we've discussed.")]
 
 def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):
     """

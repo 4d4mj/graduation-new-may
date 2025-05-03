@@ -46,7 +46,7 @@ export default function ChatBox() {
       console.log(data)
 
       // 3) append the assistant’s reply
-      const assistantMsg = { role: "assistant", content: data.reply };
+      const assistantMsg = { role: "assistant", content: data.reply, agent: data.agent };
       setMessages((m) => [...m, assistantMsg]);
     } catch (err) {
       console.error("Chat error:", err);
@@ -70,6 +70,7 @@ export default function ChatBox() {
                 m.role === "user" ? "bg-blue-200" : "bg-gray-200"
               }`}
             >
+              <div className={`text-xs font-medium ${m.role == "user" ? "text-right" : ""}`}>{m.role} {m.agent ? `using ${m.agent}` : ""}</div>
               <ReactMarkdown>{m.content}</ReactMarkdown>
             </div>
           </div>
