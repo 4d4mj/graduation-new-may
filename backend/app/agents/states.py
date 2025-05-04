@@ -1,12 +1,14 @@
 # app/agents/state.py
 from typing import Any, List
+from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
+from typing_extensions import Annotated
 from langgraph.graph import MessagesState
 from pydantic import Field
 
 class BaseAgentState(MessagesState):
     # ─── shared by all roles ───────────────────────────────────
-    messages: List[BaseMessage] = Field(default_factory=list)
+    messages: Annotated[List[BaseMessage], add_messages] = Field(default_factory=list)
     current_input: Any | None = None
     agent_name: str | None = None
     final_output: str | None = None
