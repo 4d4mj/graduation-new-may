@@ -2,7 +2,9 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableLambda
 from app.config.settings import settings
+import asyncio
 # ── built‑in tools
 from app.agents.tools import (
     small_talk
@@ -43,7 +45,7 @@ SPECIAL INSTRUCTIONS FOR FOLLOW-UPS:
 SCHEDULING TOOLS:
 - Use `list_free_slots` to find available appointment times for a specific doctor.
     - Parameters:
-        - doctor_name (str, optional): The name of the doctor you want to check availability for.
+        - doctor_name (str, optional): The name of the doctor you want to check availability for (without decorators like Dr. or dr).
         - day (str, optional): Date in YYYY-MM-DD format (defaults to tomorrow).
     - Example: list_free_slots(doctor_name="John", day="2024-07-15")
 

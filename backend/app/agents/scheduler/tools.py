@@ -64,7 +64,7 @@ def _parse_iso_datetime(dt_str: str) -> datetime | None:
 # ═══════════════════════════════════════════════════════════════════════════
 # 1.  Appointment‑related tools  (kept exactly as before)
 # ═══════════════════════════════════════════════════════════════════════════
-@tool("list_free_slots", return_direct=False)
+@tool("list_free_slots", return_direct=True)
 async def list_free_slots(doctor_name: str, day: str | None = None) -> str:
     """
     Human readable list of 30‑minute free slots for a doctor on a given day.
@@ -81,25 +81,30 @@ async def list_free_slots(doctor_name: str, day: str | None = None) -> str:
         async with tool_db_session() as db:
             if not (doc := await get_doctor_by_name(db, doctor_name)):
                 logger.warning(f"Doctor '{doctor_name}' not found in tool.")
-                return f"Sorry, I don't know any doctor named '{doctor_name}'."
+                error_msg = f"Sorry, I don't know any doctor named '{doctor_name}'."
+                logger.info(f"Tool list_free_slots returning: '{error_msg}'")
+                return error_msg
 
             logger.debug(f"Found doctor {doc.user_id}. Checking slots...")
             slots = await get_available_slots_for_day(db, doc.user_id, target_day)
             logger.debug(f"Found slots: {slots}")
 
         if not slots:
-            return f"{doctor_name} has no free slots on {target_day}."
+            no_slots_msg = f"{doctor_name} has no free slots on {target_day}."
+            logger.info(f"Tool list_free_slots returning: '{no_slots_msg}'")
+            return no_slots_msg
 
-        return (
-            f"Here are {doctor_name}'s free 30‑minute slots on {target_day}:\n"
-            + " • ".join(slots)
-        )
+        result_string = f"Here are {doctor_name}'s free 30‑minute slots on {target_day}:\n" + " • ".join(slots)
+        logger.info(f"Tool list_free_slots returning: '{result_string}'")
+        return result_string
     except Exception as e:
         logger.error(f"Error executing list_free_slots tool: {e}", exc_info=True)
-        return "I encountered an error while trying to check the schedule. Please try again later."
+        error_msg = "I encountered an error while trying to check the schedule. Please try again later."
+        logger.info(f"Tool list_free_slots returning error: '{error_msg}'")
+        return error_msg
 
 
-@tool("book_appointment", return_direct=False)
+@tool("book_appointment", return_direct=True)
 async def book_appointment(
     doctor_name: str,
     starts_at: str,
@@ -151,7 +156,7 @@ async def book_appointment(
         return "I encountered an error while trying to book the appointment. Please try again later."
 
 
-@tool("cancel_appointment", return_direct=False)
+@tool("cancel_appointment", return_direct=True)
 async def cancel_appointment(
     appointment_id: int,
     patient_id: Annotated[int, InjectedState("user_id")],
