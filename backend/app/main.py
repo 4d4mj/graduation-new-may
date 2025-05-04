@@ -5,7 +5,8 @@ import logging
 
 from app.config.settings import settings
 from app.db.base import get_engine
-from app.db.session import get_db_session, get_session_factory
+from app.db.base import get_session_factory
+from app.db.session import get_db_session, set_global_session_factory
 from app.graphs.patient import create_patient_graph
 from app.graphs.doctor import create_doctor_graph
 
@@ -54,15 +55,23 @@ async def lifespan(app: FastAPI):
     # ------------------------------------------------------------------ start‑up -----
     logger.info("Application startup …")
 
-    # 1️⃣  Database --------------------------------------------------
-    engine = await get_engine(str(settings.database_url))
-    app.state.engine = engine
+    # --- DATABASE ---
+    logger.info("Initializing Database Engine...")
+    try:
+        engine = await get_engine(str(settings.database_url))
+        app.state.engine = engine  # <-- STORE THE ENGINE IN APP STATE
+        logger.info("DB engine ready and stored in app state.")
 
-    # Create and store session factory
-    app.state.session_factory = await get_session_factory(engine)
-    logger.info("DB engine and session factory ready")
+        # Create and store session factory in app state AND globally
+        session_factory = await get_session_factory(engine)
+        app.state.session_factory = session_factory
+        set_global_session_factory(session_factory)  # <-- SET IT GLOBALLY
+        logger.info("DB session factory ready (globally accessible).")
+    except Exception as e:
+        logger.critical(f"Failed to create DB engine: {e}", exc_info=True)
+        app.state.engine = None
 
-    # 2️⃣  MCP tool discovery (optional) -----------------------------
+    # --- MCP TOOL MANAGER ---
     mcp_tools = []  # will stay empty if no servers / failure
     # try:
     #     mcp_servers = load_mcp_config()

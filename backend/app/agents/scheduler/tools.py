@@ -29,7 +29,7 @@ from app.db.crud.appointment import (
     delete_appointment,
 )
 from app.db.crud.doctor import get_doctor_by_name
-from app.db.session import get_db_session
+from app.db.session import tool_db_session
 from app.config.settings import settings
 
 # ─── RAG & search helpers ──────────────────────────────────────────────────
@@ -71,23 +71,32 @@ async def list_free_slots(doctor_name: str, day: str | None = None) -> str:
 
     Parameters
     ----------
-    doctor_name : str  – Which doctor's calendar to check.
-    day         : str  – ISO date (YYYY‑MM‑DD).  Tomorrow by default.
+    doctor_name : str  – Which doctor's calendar to check.
+    day         : str  – ISO date (YYYY‑MM‑DD).  Tomorrow by default.
     """
     target_day = _parse_iso_date(day)
-    async for db in get_db_session(str(settings.database_url)):
-        if not (doc := await get_doctor_by_name(db, doctor_name)):
-            return f"Sorry, I don't know any doctor named '{doctor_name}'."
+    logger.info(f"Tool 'list_free_slots' called for Dr. {doctor_name} on {target_day}")
 
-        slots = await get_available_slots_for_day(db, doc.user_id, target_day)
-        break                     # we only need the first successful session
+    try:
+        async with tool_db_session() as db:
+            if not (doc := await get_doctor_by_name(db, doctor_name)):
+                logger.warning(f"Doctor '{doctor_name}' not found in tool.")
+                return f"Sorry, I don't know any doctor named '{doctor_name}'."
 
-    if not slots:
-        return f"{doctor_name} has no free slots on {target_day}."
-    return (
-        f"Here are {doctor_name}'s free 30‑minute slots on {target_day}:\n"
-        + " • ".join(slots)
-    )
+            logger.debug(f"Found doctor {doc.user_id}. Checking slots...")
+            slots = await get_available_slots_for_day(db, doc.user_id, target_day)
+            logger.debug(f"Found slots: {slots}")
+
+        if not slots:
+            return f"{doctor_name} has no free slots on {target_day}."
+
+        return (
+            f"Here are {doctor_name}'s free 30‑minute slots on {target_day}:\n"
+            + " • ".join(slots)
+        )
+    except Exception as e:
+        logger.error(f"Error executing list_free_slots tool: {e}", exc_info=True)
+        return "I encountered an error while trying to check the schedule. Please try again later."
 
 
 @tool("book_appointment", return_direct=False)
@@ -100,35 +109,46 @@ async def book_appointment(
     notes: str | None = None,
 ) -> str:
     """Create an appointment and return the DB confirmation / error text."""
+    logger.info(f"Tool 'book_appointment' called by user {patient_id} for Dr. {doctor_name} at {starts_at}")
     if not patient_id:
+        logger.warning("Booking tool called without patient_id.")
         return "I couldn't identify you – please log in again."
 
     start_dt = _parse_iso_datetime(starts_at)
     if not start_dt:
+        logger.warning(f"Invalid starts_at format received: {starts_at}")
         return "Please give the start time in ISO format `YYYY‑MM‑DDTHH:MM:SS`."
 
-    async for db in get_db_session(str(settings.database_url)):
-        doc = await get_doctor_by_name(db, doctor_name)
-        if not doc:
-            return f"No doctor named '{doctor_name}'."
+    try:
+        async with tool_db_session() as db:
+            doc = await get_doctor_by_name(db, doctor_name)
+            if not doc:
+                logger.warning(f"Doctor '{doctor_name}' not found during booking.")
+                return f"No doctor named '{doctor_name}'."
 
-        result = await create_appointment(
-            db,
-            patient_id=patient_id,
-            doctor_id=doc.user_id,
-            starts_at=start_dt,
-            ends_at=start_dt + timedelta(minutes=duration_minutes),
-            location=location,
-            notes=notes,
+            logger.debug(f"Attempting to create appointment entry in DB for user {patient_id} with doctor {doc.user_id}")
+            result = await create_appointment(
+                db,
+                patient_id=patient_id,
+                doctor_id=doc.user_id,
+                starts_at=start_dt,
+                ends_at=start_dt + timedelta(minutes=duration_minutes),
+                location=location,
+                notes=notes,
+            )
+
+        if not result or result.get("status") != "confirmed":
+            logger.warning(f"Booking failed for Dr. {doctor_name} at {starts_at}. Reason: {result.get('message', 'Unknown') if result else 'None'}")
+            return result.get("message", "Could not book – please try another slot.") if result else "Booking failed for an unknown reason."
+
+        logger.info(f"Booking successful: ID {result.get('id')}")
+        return (
+            f"Your appointment (ID {result['id']}) with Dr. {doctor_name} "
+            f"on {start_dt:%Y‑%m‑%d at %H:%M %Z} is confirmed 🎉." # Use %Z for timezone if available
         )
-        break
-
-    if not result or result["status"] != "confirmed":
-        return result.get("message", "Could not book – please try another slot.")
-    return (
-        f"Your appointment (ID {result['id']}) with Dr. {doctor_name} "
-        f"on {start_dt:%Y‑%m‑%d at %H:%M UTC} is confirmed 🎉."
-    )
+    except Exception as e:
+        logger.error(f"Error executing book_appointment tool: {e}", exc_info=True)
+        return "I encountered an error while trying to book the appointment. Please try again later."
 
 
 @tool("cancel_appointment", return_direct=False)
@@ -137,12 +157,23 @@ async def cancel_appointment(
     patient_id: Annotated[int, InjectedState("user_id")],
 ) -> str:
     """Cancel an existing appointment owned by the current user."""
+    logger.info(f"Tool 'cancel_appointment' called by user {patient_id} for appointment ID {appointment_id}")
     if not patient_id:
+        logger.warning("Cancel tool called without patient_id.")
         return "I couldn't identify you – please log in again."
-    async for db in get_db_session(str(settings.database_url)):
-        result = await delete_appointment(db, appointment_id, patient_id)
-        break
-    return result.get("message", "Sorry – I couldn't cancel that appointment.")
+
+    try:
+        async with tool_db_session() as db:
+            logger.debug(f"Attempting to delete appointment {appointment_id} for user {patient_id}")
+            result = await delete_appointment(db, appointment_id, patient_id)
+
+        log_func = logger.info if result.get("status") == "cancelled" else logger.warning
+        log_func(f"Cancellation result for appt {appointment_id} / user {patient_id}: {result}")
+
+        return result.get("message", "Sorry – I couldn't cancel that appointment.")
+    except Exception as e:
+        logger.error(f"Error executing cancel_appointment tool: {e}", exc_info=True)
+        return "I encountered an error while trying to cancel the appointment. Please try again later."
 
 
 # ═══════════════════════════════════════════════════════════════════════════
