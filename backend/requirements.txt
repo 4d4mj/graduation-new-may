@@ -20,3 +20,4 @@ langchain-community
 langchain-cohere
 langchain-postgres
 psycopg[binary]
+langsmith
