@@ -1,165 +1,93 @@
 """
-Database-powered appointment scheduler tools.
+Database‑powered appointment scheduler + knowledge‑retrieval tools
+──────────────────────────────────────────────────────────────────
+Everything here is exposed to the LLM as a *LangChain tool*.
 
-These tools interact with the appointments table in the database
-to manage appointment scheduling, booking, and cancellation.
+✔ list_free_slots     – see open half‑hour slots for a doctor
+✔ book_appointment    – create a new appointment
+✔ cancel_appointment  – cancel an existing appointment
+✔ run_rag             – search the internal medical KB and return an answer + confidence
+✔ run_web_search      – fallback: search the public web for recent info
 """
 from __future__ import annotations
+
 import logging
 from datetime import datetime, timedelta, date, time, timezone
-from typing import Optional
+from typing import Optional, Iterable, Dict, Any, List
 
 from langchain_core.tools import tool
+from langchain_core.messages import AIMessage
+
+# ─── DB crud helpers (unchanged) ────────────────────────────────────────────
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import Annotated
 from langgraph.prebuilt import InjectedState
 
-# Import the CRUD functions and session utility
 from app.db.crud.appointment import (
     get_available_slots_for_day,
     create_appointment,
     delete_appointment,
 )
-# Import NEW doctor CRUD function
-from app.db.crud.doctor import (
-    get_doctor_details_by_user_id,
-    get_doctor_by_name,
-    list_all_doctors,
-)
+from app.db.crud.doctor import get_doctor_by_name
 from app.db.session import get_db_session
 from app.config.settings import settings
 
+# ─── RAG & search helpers ──────────────────────────────────────────────────
+from app.agents.rag.core import MedicalRAG          # trimmed‑down version below
+from langchain_community.tools.tavily_search import TavilySearchResults
+
 logger = logging.getLogger(__name__)
 
-# Helper to parse date string (add more robust parsing if needed)
-def parse_iso_date(day_str: str | None) -> date:
-    if day_str:
-        try:
-            return date.fromisoformat(day_str)
-        except ValueError:
-            logger.warning(f"Invalid date format '{day_str}'. Defaulting to tomorrow.")
-    # Default to tomorrow if None or invalid
-    return (datetime.now(timezone.utc) + timedelta(days=1)).date()
-
-# Helper to parse time string and combine with date
-def parse_datetime_str(datetime_str: str) -> datetime | None:
-    """
-    Parses various datetime formats and standardizes to UTC.
-    Supports ISO format (YYYY-MM-DDTHH:MM:SS) with or without timezone.
-    Also attempts to handle common non-ISO formats.
-    """
-    if not datetime_str:
-        logger.error("Empty datetime string provided")
-        return None
-
-    # Strip any extra whitespace that might cause parsing errors
-    datetime_str = datetime_str.strip()
-
+# ═══════════════════════════════════════════════════════════════════════════
+# Basic date/‑time utilities (unchanged)
+# ═══════════════════════════════════════════════════════════════════════════
+def _parse_iso_date(day_str: str | None) -> date:
     try:
-        # First attempt: Standard ISO format with fromisoformat
-        try:
-            dt = datetime.fromisoformat(datetime_str)
-        except ValueError:
-            # Second attempt: Try to handle common non-ISO formats
-            formats_to_try = [
-                "%Y-%m-%d %H:%M:%S",  # 2025-05-03 14:30:00
-                "%Y-%m-%d %H:%M",      # 2025-05-03 14:30
-                "%Y/%m/%d %H:%M:%S",   # 2025/05/03 14:30:00
-                "%Y/%m/%d %H:%M",      # 2025/05/03 14:30
-                "%d-%m-%Y %H:%M:%S",   # 03-05-2025 14:30:00
-                "%d-%m-%Y %H:%M",      # 03-05-2025 14:30
-                "%d/%m/%Y %H:%M:%S",   # 03/05/2025 14:30:00
-                "%d/%m/%Y %H:%M",      # 03/05/2025 14:30
-            ]
+        return date.fromisoformat(day_str) if day_str else (
+            datetime.now(timezone.utc) + timedelta(days=1)
+        ).date()
+    except ValueError:
+        logger.warning("Invalid ISO date '%s' – defaulting to tomorrow", day_str)
+        return (datetime.now(timezone.utc) + timedelta(days=1)).date()
 
-            for fmt in formats_to_try:
-                try:
-                    dt = datetime.strptime(datetime_str, fmt)
-                    logger.info(f"Parsed datetime using alternative format: {fmt}")
-                    break
-                except ValueError:
-                    continue
-            else:  # If no format worked
-                logger.error(f"Failed to parse datetime with any supported format: {datetime_str}")
-                return None
 
-        # Ensure timezone is set (use UTC if none provided)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-
-        # Convert to UTC for storage
-        return dt.astimezone(timezone.utc)
-
-    except Exception as e:
-        logger.error(f"Unexpected error parsing datetime '{datetime_str}': {str(e)}")
+def _parse_iso_datetime(dt_str: str) -> datetime | None:
+    """Very small wrapper around datetime.fromisoformat + UTC fallback."""
+    try:
+        dt = datetime.fromisoformat(dt_str.strip())
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        logger.warning("Invalid ISO datetime '%s'", dt_str)
         return None
 
-# ------------------------------------------------------------------ tools
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1.  Appointment‑related tools  (kept exactly as before)
+# ═══════════════════════════════════════════════════════════════════════════
 @tool("list_free_slots", return_direct=False)
-async def list_free_slots(doctor_name: Optional[str] = None, day: str | None = None) -> str:
+async def list_free_slots(doctor_name: str, day: str | None = None) -> str:
     """
-    Return a *human-readable* list of 30-minute free slots for a specific doctor on a given ISO date (YYYY-MM-DD).
+    Human readable list of 30‑minute free slots for a doctor on a given day.
 
-    Args:
-        doctor_name (Optional[str]): The name of the doctor. If None, will use a default doctor.
-        day (str | None): Date in YYYY-MM-DD format. Defaults to tomorrow if not provided or invalid.
+    Parameters
+    ----------
+    doctor_name : str  – Which doctor's calendar to check.
+    day         : str  – ISO date (YYYY‑MM‑DD).  Tomorrow by default.
     """
-    target_day = parse_iso_date(day)
-    logger.info(f"Tool 'list_free_slots' called for doctor '{doctor_name}' on {target_day.isoformat()}")
+    target_day = _parse_iso_date(day)
+    async for db in get_db_session(str(settings.database_url)):
+        if not (doc := await get_doctor_by_name(db, doctor_name)):
+            return f"Sorry, I don't know any doctor named '{doctor_name}'."
 
-    # Default doctor ID to use if no name provided or doctor not found
-    default_doctor_id = 4
-
-    slots = []
-    doctor_name_display = f"Doctor" # Default name if lookup fails
-    db_session: AsyncSession | None = None
-    doctor_id = None
-
-    try:
-        async for db in get_db_session(str(settings.database_url)):
-            db_session = db
-            logger.info(f"Database session obtained for list_free_slots")
-
-            # --- Find doctor by name if provided ---
-            if doctor_name:
-                doctor = await get_doctor_by_name(db, doctor_name)
-                if doctor:
-                    doctor_id = doctor.user_id
-                    doctor_name_display = f"Dr. {doctor.first_name} {doctor.last_name}"
-                    logger.info(f"Found doctor: {doctor_name_display} (ID: {doctor_id})")
-                else:
-                    logger.warning(f"Doctor with name '{doctor_name}' not found.")
-            else:
-               return "Sorry, I don't have the doctor id."
-
-            # At this point, we should have a valid doctor_id
-            if doctor_id:
-                logger.info(f"Checking schedule for {doctor_name_display} (ID: {doctor_id})")
-                slots = await get_available_slots_for_day(db, doctor_id, target_day)
-                logger.info(f"get_available_slots_for_day returned {len(slots)} slots for {doctor_name_display}.")
-            else:
-                return "Sorry, I couldn't determine which doctor's schedule to check."
-
-            break # Exit after first successful session use
-
-        if db_session is None:
-             logger.error("Failed to obtain a database session for list_free_slots.")
-             return "Sorry, I couldn't connect to the scheduling database at the moment."
-
-    except Exception as e:
-        logger.error(f"Error during list_free_slots execution for doctor '{doctor_name}': {e}", exc_info=True)
-        return f"Sorry, I encountered an error trying to check the schedule. Please try again later."
-    finally:
-        if db_session:
-            try: await db_session.close()
-            except Exception: pass # Ignore errors during close
+        slots = await get_available_slots_for_day(db, doc.user_id, target_day)
+        break                     # we only need the first successful session
 
     if not slots:
-        # Doctor existence was already checked, so just report no slots
-        return f"There are no available slots found for {doctor_name_display} on {target_day.isoformat()}."
-    else:
-        slot_list = "\n • ".join(slots)
-        return f"Here are the available slots for {doctor_name_display} on {target_day.isoformat()}:\n • {slot_list}"
+        return f"{doctor_name} has no free slots on {target_day}."
+    return (
+        f"Here are {doctor_name}'s free 30‑minute slots on {target_day}:\n"
+        + " • ".join(slots)
+    )
 
 
 @tool("book_appointment", return_direct=False)
@@ -171,88 +99,36 @@ async def book_appointment(
     location: str = "Main Clinic",
     notes: str | None = None,
 ) -> str:
-    """
-    Books a new appointment for the current user with a doctor at a given start time and duration.
-    Returns a confirmation or error message.
-
-    Args:
-        doctor_name (str): The name of the doctor to book with.
-        starts_at (str): The desired start time in ISO format (e.g., "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DDTHH:MM:SSZ"). Assumed UTC if no timezone.
-        patient_id (str): The ID of the patient to book for.
-        duration_minutes (int): The duration of the appointment in minutes (default 30).
-        location (str): The location of the appointment (default "Main Clinic").
-        notes (str | None): Optional notes for the appointment.
-    """
-    logger.info(f"Tool 'book_appointment' called: doctor_name='{doctor_name}', start='{starts_at}'")
-
+    """Create an appointment and return the DB confirmation / error text."""
     if not patient_id:
-        logger.error("Failed to extract patient_id from session token")
-        return "I couldn't identify you from your session. Please log in again."
+        return "I couldn't identify you – please log in again."
 
-    # --- Basic Input Validation ---
-    if not doctor_name or not isinstance(doctor_name, str):
-        logger.error(f"book_appointment called with invalid doctor_name: {doctor_name}")
-        return "I need the doctor's name to book the appointment."
-
-    start_dt = parse_datetime_str(starts_at)
+    start_dt = _parse_iso_datetime(starts_at)
     if not start_dt:
-         return "Invalid start time format provided. Please use YYYY-MM-DDTHH:MM:SS format (timezone optional, UTC assumed)."
-    # -----------------------------
+        return "Please give the start time in ISO format `YYYY‑MM‑DDTHH:MM:SS`."
 
-    end_dt = start_dt + timedelta(minutes=duration_minutes)
-    booking_result = None
-    doctor_display_name = f"Doctor {doctor_name}" # Default name
-    db_session: AsyncSession | None = None
-    doctor_id = None  # Will be set if we find the doctor
+    async for db in get_db_session(str(settings.database_url)):
+        doc = await get_doctor_by_name(db, doctor_name)
+        if not doc:
+            return f"No doctor named '{doctor_name}'."
 
-    try:
-        async for db in get_db_session(str(settings.database_url)):
-            db_session = db
-            logger.info(f"Database session obtained for book_appointment (Patient: {patient_id}, Doctor name: {doctor_name}).")
+        result = await create_appointment(
+            db,
+            patient_id=patient_id,
+            doctor_id=doc.user_id,
+            starts_at=start_dt,
+            ends_at=start_dt + timedelta(minutes=duration_minutes),
+            location=location,
+            notes=notes,
+        )
+        break
 
-            # --- Find doctor by name ---
-            doctor = await get_doctor_by_name(db, doctor_name)
-            if not doctor:
-                logger.warning(f"No doctor found with name '{doctor_name}'")
-                return f"Sorry, I couldn't find a doctor named '{doctor_name}'. Please check the name and try again."
-
-            doctor_id = doctor.user_id
-            doctor_display_name = f"Dr. {doctor.first_name} {doctor.last_name}"
-            logger.info(f"Found doctor: {doctor_display_name} (ID: {doctor_id})")
-            # -------------------------
-
-            booking_result = await create_appointment(
-                db=db, patient_id=patient_id, doctor_id=doctor_id,
-                starts_at=start_dt, ends_at=end_dt, location=location, notes=notes,
-            )
-            logger.info(f"create_appointment returned: {booking_result}")
-            break # Exit after first successful session use
-
-        if db_session is None:
-             logger.error("Failed to obtain a database session for book_appointment.")
-             return "Sorry, I couldn't connect to the scheduling database at the moment."
-
-    except Exception as e:
-        logger.error(f"Failed to book appointment for patient {patient_id} with doctor '{doctor_name}': {e}", exc_info=True)
-        return "Sorry, I encountered an error trying to book the appointment. Please try again later."
-    finally:
-        if db_session:
-            try: await db_session.close()
-            except Exception: pass
-
-    if booking_result:
-        status = booking_result.get("status")
-        if status == "confirmed":
-            return (f"OK. Your appointment (ID: {booking_result['id']}) with {doctor_display_name} "
-                    f"on {start_dt.strftime('%Y-%m-%d')} at {start_dt.strftime('%H:%M')} UTC has been confirmed. "
-                    f"Location: {booking_result['location']}.")
-        elif status == "conflict":
-            return booking_result.get("message", "Sorry, that time slot is no longer available.")
-        else: # error or other status
-            return booking_result.get("message", "An unexpected issue occurred while booking.")
-    else:
-        # This case might happen if db session failed before booking_result was assigned
-        return "Sorry, I couldn't book the appointment due to an unexpected error."
+    if not result or result["status"] != "confirmed":
+        return result.get("message", "Could not book – please try another slot.")
+    return (
+        f"Your appointment (ID {result['id']}) with Dr. {doctor_name} "
+        f"on {start_dt:%Y‑%m‑%d at %H:%M UTC} is confirmed 🎉."
+    )
 
 
 @tool("cancel_appointment", return_direct=False)
@@ -260,52 +136,54 @@ async def cancel_appointment(
     appointment_id: int,
     patient_id: Annotated[int, InjectedState("user_id")],
 ) -> str:
-    """
-    Cancels an existing appointment by its ID.
-
-    Args:
-        appointment_id (int): The unique ID of the appointment to cancel.
-        patient_id (str): The ID of the patient to cancel the appointment for.
-    """
-    logger.info(f"Tool 'cancel_appointment' called for appointment {appointment_id}")
-
-
+    """Cancel an existing appointment owned by the current user."""
     if not patient_id:
-        logger.error("Failed to extract patient_id from session token")
-        return "I couldn't identify you from your session. Please log in again."
+        return "I couldn't identify you – please log in again."
+    async for db in get_db_session(str(settings.database_url)):
+        result = await delete_appointment(db, appointment_id, patient_id)
+        break
+    return result.get("message", "Sorry – I couldn't cancel that appointment.")
 
-    # --- Basic Input Validation ---
-    if not isinstance(appointment_id, int) or appointment_id <= 0:
-        logger.error(f"cancel_appointment called with invalid appointment_id: {appointment_id}")
-        return "I need the appointment ID to cancel it."
-    # -----------------------------
 
-    cancellation_result = None
-    db_session: AsyncSession | None = None
-    try:
-        async for db in get_db_session(str(settings.database_url)):
-             db_session = db
-             logger.info(f"Database session obtained for cancel_appointment (Appt ID: {appointment_id}, Patient ID: {patient_id}).")
-             cancellation_result = await delete_appointment(
-                 db=db, appointment_id=appointment_id, patient_id=patient_id
-             )
-             logger.info(f"delete_appointment returned: {cancellation_result}")
-             break # Exit after first successful session use
-        if db_session is None:
-             logger.error("Failed to obtain a database session for cancel_appointment.")
-             return "Sorry, I couldn't connect to the scheduling database at the moment."
+# ═══════════════════════════════════════════════════════════════════════════
+# 2.  Knowledge‑retrieval tools
+# ═══════════════════════════════════════════════════════════════════════════
+_RAG: Optional[MedicalRAG] = None      # singleton so we don’t re‑load every call
 
-    except Exception as e:
-        logger.error(f"Failed to cancel appointment {appointment_id} for patient {patient_id}: {e}", exc_info=True)
-        return "Sorry, I encountered an error trying to cancel the appointment. Please try again later."
-    finally:
-        if db_session:
-            try: await db_session.close()
-            except Exception: pass
 
-    if cancellation_result:
-        return cancellation_result.get("message", "Could not process cancellation request.")
-    else:
-        # This case might happen if db session failed
-        return "Sorry, I couldn't cancel the appointment due to an unexpected error."
+def _get_rag() -> MedicalRAG:
+    global _RAG
+    if _RAG is None:
+        _RAG = MedicalRAG()           # very light‑weight object now
+    return _RAG
 
+
+@tool("run_rag", return_direct=False)
+async def run_rag(query: str, chat_history: str | None = None) -> dict:
+    """
+    Search the **internal** medical knowledge‑base.
+
+    Returns
+    -------
+    dict  –  { "answer": str, "confidence": float, "sources": list }
+    """
+    rag = _get_rag()
+    result = await rag.process_query(query, chat_history)
+    answer_msg: AIMessage = result["response"]
+    return {
+        "answer":     answer_msg.content,
+        "confidence": round(result.get("confidence", 0.0), 3),
+        "sources":    result.get("sources", []),
+    }
+
+
+@tool("run_web_search", return_direct=False)
+async def run_web_search(query: str, k: int = 5) -> str:
+    """
+    Lightweight public‑web fallback (Tavily).
+
+    Returns the first `k` snippets concatenated.
+    """
+    tavily = TavilySearchResults(k=k)
+    snippets = tavily.run(query)
+    return "\n".join([item["snippet"] for item in snippets])

@@ -17,3 +17,6 @@ langgraph
 langchain-mcp-adapters
 langchain-google-genai
 langchain-community
+langchain-cohere
+langchain-postgres
+psycopg[binary]
