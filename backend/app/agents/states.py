@@ -5,6 +5,7 @@ from langchain_core.messages import BaseMessage
 from typing_extensions import Annotated
 from langgraph.graph import MessagesState
 from pydantic import Field
+from datetime import datetime, timezone
 
 class BaseAgentState(MessagesState):
     # ─── shared by all roles ───────────────────────────────────
@@ -14,12 +15,12 @@ class BaseAgentState(MessagesState):
     final_output: str | None = None
     needs_human_validation: bool = False
     user_id: str | None = None
+    now: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class PatientState(BaseAgentState):
     # ─── patient-only fields ──────────────────────────────────
     request_scheduling: bool = False
     next_agent: str | None = None
-    # Required by LangGraph's React agent
     remaining_steps: int = 10
 
 class DoctorState(BaseAgentState):
@@ -27,7 +28,6 @@ class DoctorState(BaseAgentState):
     retrieval_confidence: float = 0.0
     web_search_results: str | None = None
     generate_report_result: str | None = None
-    # Required by LangGraph's React agent
     remaining_steps: int = 10
 
 def init_state_for_role(role: str) -> BaseAgentState:

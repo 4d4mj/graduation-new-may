@@ -182,13 +182,13 @@ def guard_in(state: dict) -> dict:
                 reason = first_line.split(':', 1)[1].strip() if ':' in first_line else "unspecified reason"
                 rejection_message = "Sorry, I can't help with that request for safety reasons."
                 state["final_output"] = rejection_message
-                state["agent_name"] = "input_guardrail"  # Set agent name
+                state["agent_name"] = "Input Guardrail"  # Set agent name
                 log.warning(f"Input guardrail triggered for input: '{current_input}'. Reason: {reason}. Setting final_output.")
                 return state
         else:
             log.warning("Guard received empty verdict. Assuming unsafe.")
             state["final_output"] = "Sorry, I can't help with that request for safety reasons."
-            state["agent_name"] = "input_guardrail"
+            state["agent_name"] = "Input Guardrail"
             return state
     else:
         # Empty input is safe
@@ -204,7 +204,7 @@ def guard_out(state: dict) -> dict:
     if not _check(output_prompt, txt):
         log.warning(f"Output guardrail triggered for text: '{txt[:100]}...'. Overwriting output.")
         txt = "I'm sorry, I can't share that."
-        state["agent_name"] = "output_guardrail"
+        state["agent_name"] = "Output Guardrail"
     else:
          log.info("Output guardrail passed.")
          # Optional: Clear the agent_name if it was set by the guardrail previously in the same turn?

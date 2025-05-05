@@ -83,7 +83,7 @@ async def chat(
     # Get agent name
     agent_name = final_state.get("agent_name")
     if agent_name is None:
-        agent_name = "medical_assistant"  # Provide a default value to pass validation
+        agent_name = "Medical Assistant"  # Provide a default value to pass validation
         logger.warning("No agent_name was set in final state, using default: %s", agent_name)
 
     # --- Build response history ---
@@ -101,4 +101,50 @@ async def chat(
         agent=agent_name,
         messages=response_messages,
         session_id=session,
+    )
+
+import random
+@router.post("/test", response_model=ChatResponse, status_code=200)
+async def testChat(
+    payload: ChatRequest,
+    request: Request,
+    session: str | None = Cookie(default=None, alias="session")
+):
+    """
+    Simulates a more realistic chat interaction for UI testing.
+    Includes mock history and varied, longer responses.
+    """
+    # --- Authentication Check ---
+    if session is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        # Replace with your actual token validation logic
+        user_info = decode_access_token(session)
+        # You might use user_info later if needed
+    except Exception as e:
+        # Log the error e for debugging if necessary
+        raise HTTPException(status_code=401, detail="Invalid session token")
+
+    # --- Simulate Realistic Interaction ---
+    # Select a random realistic reply
+    reply = random.choice([
+        "That's an interesting point. Could you elaborate a bit more on that?",
+        "I understand. Based on what you've said, perhaps we could explore options like [Option A] or [Option B]. What are your thoughts?",
+        "Thank you for sharing that. Let me process this information. One moment please...",
+        "Okay, I've noted that down. Is there anything else you'd like to add or discuss regarding this topic?",
+        "Processing your request... This might take a few moments. In the meantime, have you considered [Related Topic]?",
+        "Acknowledged. I'm accessing the relevant information now. This is a complex area, so accuracy is key.",
+        "Let's break that down. The first aspect to consider is [...], followed by [...]. Does that make sense so far?",
+    ])
+    # Add a bit more context if needed, e.g., mentioning the user's message
+    # reply = f"Regarding your message about '{payload.message[:30]}...': {reply}" # Optional: Add context
+
+    agent_name = "Medical Assistant" # Or make this dynamic if needed
+
+    # --- Return Response ---
+    return ChatResponse(
+        reply=reply,
+        agent=agent_name,
+        session_id=session, # Return the session token received
+        messages=[]  # Include the simulated history
     )
