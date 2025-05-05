@@ -1,6 +1,7 @@
-import { redirect } from "next/navigation";
 import { getUser } from "@/lib/user";
-import Dashboard from "./Dashboard";
+import Chat from "./components/Chat";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { ChatSideBar } from "./components/SideBar";
 
 export default async function Page() {
 	const user = await getUser();
@@ -12,6 +13,9 @@ export default async function Page() {
 	}
 
 	return (
-		<Dashboard user={user} />
+		<SidebarProvider defaultOpen={false}>
+			<ChatSideBar />
+				<Chat user={user} />
+		</SidebarProvider>
 	);
 }

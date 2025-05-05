@@ -13,6 +13,11 @@ const nextConfig = {
         destination: '/auth/register',// where you really want it
         permanent: false,          // 307 redirect
       },
+      {
+        source: '/',
+        destination: '/dashboard', // where you really want it
+        permanent: false,          // 307 redirect
+      }
     ];
   },
 };
