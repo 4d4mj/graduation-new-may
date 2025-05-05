@@ -3,20 +3,20 @@ from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
 # ── built‑in tools
-from app.agents.tools import (
-    small_talk
-)
+# from app.agents.tools import (
+#     small_talk
+# )
 
 from app.agents.states import DoctorState
 
-from app.agents.scheduler.tools import run_rag, run_web_search
+from app.agents.tools import run_rag, run_web_search
 from typing import Sequence
 import logging
 
 logger = logging.getLogger(__name__)
 
 BASE_TOOLS = [
-    small_talk,
+    # small_talk,
     run_rag,
     run_web_search
 ]

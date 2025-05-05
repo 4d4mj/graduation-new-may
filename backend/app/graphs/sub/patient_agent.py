@@ -1,25 +1,21 @@
-from langchain_core.tools import BaseTool
-from langgraph.prebuilt import create_react_agent
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableLambda
-from app.config.settings import settings
-import asyncio
-# ── built‑in tools
-from app.agents.tools import (
-    small_talk
-)
-
-from app.agents.states import PatientState
-
-from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment
-from typing import Sequence, Dict, Any
 import logging
+
+# third-party imports
+from langchain_core.tools import BaseTool
+from langgraph.prebuilt import create_react_agent  # type: ignore
+from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
+
+# local application imports
+from app.config.settings import settings
+# from app.agents.tools import small_talk
+from app.agents.states import PatientState
+from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment
+from typing import Sequence
 
 logger = logging.getLogger(__name__)
 
 BASE_TOOLS = [
-    small_talk,
+    # small_talk,
     list_free_slots,
     book_appointment,
     cancel_appointment
@@ -29,7 +25,6 @@ ASSISTANT_SYSTEM_PROMPT = """You are a professional, empathetic medical assistan
 
 YOUR CAPABILITIES:
 1. Help patients schedule appointments with scheduling tools
-2. Engage in general conversation (small_talk)
 
 GUIDELINES:
 - For any symptoms described as severe or concerning, suggest scheduling an appointment
@@ -41,6 +36,7 @@ GUIDELINES:
 SPECIAL INSTRUCTIONS FOR FOLLOW-UPS:
 - If you have just offered to schedule an appointment and the user responds with a short affirmative like "yes", "sure", "okay", or "please", use the scheduling tools with their last reported symptoms
 - Maintain context between conversation turns - if a user mentioned a symptom in a previous message, remember it when they ask follow-up questions
+"Today is {{state.now.astimezone(user_tz)|strftime('%A %d %B %Y, %H:%M %Z')}}. When the user says ‘tomorrow’, interpret it in that zone."
 
 SCHEDULING TOOLS:
 - Use `list_free_slots` to find available appointment times for a specific doctor.

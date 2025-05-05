@@ -15,6 +15,7 @@ class BaseAgentState(MessagesState):
     final_output: str | None = None
     needs_human_validation: bool = False
     user_id: str | None = None
+    user_tz: str | None = None
     now: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class PatientState(BaseAgentState):

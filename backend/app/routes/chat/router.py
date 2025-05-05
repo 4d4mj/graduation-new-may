@@ -41,6 +41,7 @@ async def chat(
         "final_output": None,
         "agent_name": None,
         "user_id": user_id,
+        "user_tz": payload.user_tz,
     }
 
     # Define config for the graph invocation

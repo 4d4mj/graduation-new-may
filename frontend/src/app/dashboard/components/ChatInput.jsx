@@ -1,36 +1,80 @@
+"use client";
+
+import React, { useCallback } from "react";
+import SpeechRecognition, {
+	useSpeechRecognition,
+} from "react-speech-recognition";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Textarea } from "@/components/ui/textarea";
-import React from "react"; // Make sure React is imported if not already globally available
 
 export default function ChatInput({ input, setInput, handleSubmit }) {
-	// Optional: Handle Enter key submission (Shift+Enter for newline)
-	const handleKeyDown = (e) => {
+	/* ---------- speech‑recognition ---------- */
+	const { transcript, listening, browserSupportsSpeechRecognition } =
+		useSpeechRecognition();
+
+	/* keep textarea in sync with live transcript */
+	React.useEffect(() => {
+		if (listening) setInput(transcript);
+	}, [transcript, listening, setInput]);
+
+	const toggleListening = useCallback(() => {
+		if (!browserSupportsSpeechRecognition) return;
+		if (listening) SpeechRecognition.stopListening();
+		else SpeechRecognition.startListening({ interimResults: true });
+	}, [listening, browserSupportsSpeechRecognition]);
+
+	/* ---------- keyboard / form handlers ---------- */
+	const onKeyDown = (e) => {
 		if (e.key === "Enter" && !e.shiftKey) {
-			e.preventDefault(); // Prevent default newline insertion
-			handleSubmit(e); // Trigger form submission
+			e.preventDefault();
+			handleSubmit(e);
 		}
 	};
 
+	const onSubmit = (e) => {
+		e.preventDefault();
+		SpeechRecognition.stopListening();
+		handleSubmit(e);
+	};
+
+	/* ---------- UI ---------- */
 	return (
-		<div className="w-full px-4 md:px-0 md:w-lg lg:w-xl xl:w-3xl">
+		<div className="max-w-3xl w-full mx-auto p-2">
 			<form
-				onSubmit={handleSubmit}
-				className="bg-form rounded-3xl overflow-hidden p-2"
+				onSubmit={onSubmit}
+				className="bg-form rounded-lg overflow-hidden"
 			>
 				<Textarea
 					value={input}
 					onChange={(e) => setInput(e.target.value)}
-					onKeyDown={handleKeyDown}
+					onKeyDown={onKeyDown}
 					placeholder="Ask Anything"
-					rows="1" // Start with 1 row visible
-					className="min-h-0 text-base md:text-base w-full border-0 focus:border-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none outline-none resize-none [field-sizing:content] max-h-[9rem] overflow-y-auto" // Override all borders and outlines
+					rows={1}
+					className="w-full px-3 py-2 rounded-l-lg border-0 focus:border-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none outline-none resize-none min-h-[2.5rem] max-h-[9rem] overflow-y-auto"
 				/>
 				<div className="flex justify-end p-2 gap-2">
-					<Button type="submit" variant="outline"><Icon>mic</Icon></Button>
-					<Button type="submit"><Icon>send</Icon></Button>
+					<Button
+						type="button"
+						variant="outline"
+						onClick={toggleListening}
+						disabled={!browserSupportsSpeechRecognition}
+						className={!listening ? "bg-red-100 text-red-800" : ""}
+					>
+						<Icon>{listening ? "mic" : "mic_off"}</Icon>
+					</Button>
+					<Button type="submit">
+						<Icon>send</Icon>
+					</Button>
 				</div>
 			</form>
+
+			{!browserSupportsSpeechRecognition && (
+				<p className="text-xs text-center text-red-600 py-1">
+					Voice input is not supported by your browser.
+				</p>
+			)}
+
 			<p className="text-xs font-medium text-center py-1 text-gray-700">
 				AI can make mistakes. Check important info.
 			</p>

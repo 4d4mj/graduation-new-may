@@ -21,3 +21,4 @@ langchain-cohere
 langchain-postgres
 psycopg[binary]
 langsmith
+dateparser

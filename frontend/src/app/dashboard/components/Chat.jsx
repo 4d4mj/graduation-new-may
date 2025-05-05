@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import ConversationArea from "./ConversationArea";
-import ChatInput from "./ChatInput";
+import dynamic from "next/dynamic"
 import Navbar from "./Navbar";
+
+const ChatInput = dynamic(() => import("./ChatInput"), { ssr: false })
 
 export default function Chat({ user }) {
 	const [input, setInput] = useState("");
@@ -32,11 +34,12 @@ export default function Chat({ user }) {
 			const res = await fetch(
 				`${
 					process.env.NEXT_PUBLIC_API_URL || "http://backend:8000"
-				}/chat/test`,
+				}/chat/`,
 				{
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					credentials: "include",
+					user_tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
 					body: JSON.stringify(payload),
 				}
 			);

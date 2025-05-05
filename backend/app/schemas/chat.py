@@ -36,6 +36,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="Current user utterance")
     history: Optional[List[ChatMessage]] = None
     image_url: Optional[str] = None
+    user_tz: Optional[str] = Field(None, description="User IANA timezone, e.g. 'Asia/Beirut'")
 
 
 # --------------------------------------------------------------------------
