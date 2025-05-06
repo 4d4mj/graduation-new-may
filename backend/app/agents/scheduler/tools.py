@@ -192,3 +192,17 @@ async def cancel_appointment(
     except Exception as e:
         logger.error(f"Error executing cancel_appointment tool: {e}", exc_info=True)
         return "I encountered an error while trying to cancel the appointment. Please try again later."
+
+@tool("propose_booking")
+async def propose_booking(
+    doctor_name: str,
+    starts_at: str,
+    notes: str | None = None,
+) -> dict:
+    """Return a booking proposal **without** touching the DB."""
+    return {
+        "type": "confirm_booking",
+        "doctor": doctor_name,
+        "starts_at": starts_at,
+        "notes": notes,
+    }

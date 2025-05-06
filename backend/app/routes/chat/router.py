@@ -1,12 +1,12 @@
 import logging
 from fastapi import APIRouter, HTTPException, Cookie, Request
 from app.config.settings import env
-from langchain_core.messages import HumanMessage, BaseMessage
+from langchain_core.messages import HumanMessage, BaseMessage, ToolMessage
 from typing import List
 from app.core.auth import decode_access_token
 from app.schemas.chat import ChatRequest, ChatResponse
-from langgraph.errors import GraphInterrupt            # or GraphInterrupt
-from langgraph.types  import Command
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Command
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -36,17 +36,21 @@ async def chat(
         logger.error(f"Graph for role '{role}' not found!")
         raise HTTPException(500, f"Invalid role '{role}' or graph not initialized.")
 
+    # Define config for the graph invocation (needed for both paths)
+    config = {
+        "configurable": {
+            "thread_id": session
+        }
+    }
+
     # --- Handle resume with interrupt_id if present ---
     if payload.interrupt_id:
         logger.info(f"Resuming from interrupt: {payload.interrupt_id}")
-        cmd = Command(resume=payload.resume_value, interrupt_id=payload.interrupt_id)
+        # Don't include interrupt_id in the Command - it will be matched internally
+        cmd = Command(resume=payload.resume_value)
 
         try:
-            final_state = await graph.ainvoke(cmd, config={
-                "configurable": {
-                    "thread_id": session
-                }
-            })
+            final_state = await graph.ainvoke(cmd, config=config)
         except Exception as e:
             logger.exception(f"Error resuming graph execution: {e}")
             raise HTTPException(500, f"Error resuming: {e}")
@@ -61,24 +65,16 @@ async def chat(
             "user_tz": payload.user_tz,
         }
 
-        # Define config for the graph invocation
-        config = {
-            "configurable": {
-                "thread_id": session
-            }
-        }
-
         try:
             final_state = await graph.ainvoke(graph_input, config=config)
         except GraphInterrupt as gi:
-            # Surface the interrupt payload to the UI
+            # Surface the interrupt payload to the UI - this contains raw tool data
             logger.info(f"Graph interrupted: {gi.value}")
             return ChatResponse(
                 reply=gi.value,
                 agent="Scheduler",
-                interrupt_id=gi.ns[0],
-                messages=[],
-                session_id=session
+                interrupt_id=gi.ns[0],  # Pass the interrupt ID to the client
+                session=session
             )
         except Exception as e:
             logger.exception("Error running graph")
@@ -88,17 +84,25 @@ async def chat(
     # Extract the response from the final state
     all_messages: List[BaseMessage] = final_state.get("messages", [])
 
-    # Prioritize final_output if set (likely by guardrails)
-    reply = final_state.get("final_output")
+    # Check for tool messages - these contain raw structured data
+    for message in reversed(all_messages):
+        if isinstance(message, ToolMessage):
+            # If the last message is from a tool, use its raw content directly
+            reply = message.content
+            logger.info(f"Using raw tool output as reply: {reply}")
+            break
+    else:
+        # Prioritize final_output if set (likely by guardrails)
+        reply = final_state.get("final_output")
 
-    # If guardrails didn't set final_output, get reply from the last message
-    if reply is None and all_messages:
-        last_message = all_messages[-1]
-        # Check if it's an AIMessage, not a ToolMessage or HumanMessage
-        if hasattr(last_message, 'content') and not isinstance(last_message, HumanMessage):
-            reply = str(last_message.content)
-        else:
-            logger.warning("Last message was not AI content, state: %s", final_state)
+        # If guardrails didn't set final_output, get reply from the last message
+        if reply is None and all_messages:
+            last_message = all_messages[-1]
+            # Check if it's an AIMessage, not a ToolMessage or HumanMessage
+            if hasattr(last_message, 'content') and not isinstance(last_message, HumanMessage):
+                reply = str(last_message.content)
+            else:
+                logger.warning("Last message was not AI content, state: %s", final_state)
 
     logger.info("Using reply: %s", reply)
 
