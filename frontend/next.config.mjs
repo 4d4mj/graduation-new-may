@@ -15,7 +15,7 @@ const nextConfig = {
       },
       {
         source: '/',
-        destination: '/dashboard', // where you really want it
+        destination: '/c', // where you really want it
         permanent: false,          // 307 redirect
       }
     ];

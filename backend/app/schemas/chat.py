@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -28,15 +28,16 @@ class ChatRequest(BaseModel):
     What the *frontend* sends to /chat.
 
     * `message`      - the user's current turn
-    * `history`      - the last N messages the browser still has. Optional,
-                       because you may reconstruct it server-side instead.
-    * `image_url`    - future-proof: if you later re-enable vision, you can
-                       simply change `Optional[str]` into a richer object.
+    * `user_tz`      - the user's timezone (IANA format, e.g. 'Asia/Beirut').
+                       This is used to parse dates and times in the conversation.
+                       If not provided, UTC is assumed.
+    * `interrupt_id` - ID of the interrupt to resume, if applicable
+    * `resume_value` - Value to resume with (e.g., "yes" or "no" for confirmations)
     """
     message: str = Field(..., min_length=1, description="Current user utterance")
-    history: Optional[List[ChatMessage]] = None
-    image_url: Optional[str] = None
     user_tz: Optional[str] = Field(None, description="User IANA timezone, e.g. 'Asia/Beirut'")
+    interrupt_id: Optional[str] = Field(None, description="ID of the interrupt to resume")
+    resume_value: Optional[Any] = Field(None, description="Value to resume with")
 
 
 # --------------------------------------------------------------------------
@@ -50,11 +51,14 @@ class ChatResponse(BaseModel):
                        guard-railed by LangGraph).
     * `agent`        - which specialised agent inside the orchestrator
                        produced that reply (conversation, RAG, web-search…).
-    * `messages`     - the *new* canonical history,
-                       i.e. `history + [user_msg] + [assistant_msg]`.
-                       Returning it lets the browser keep perfect state even
-                       if you later trim / summarise server-side.
+    * `session`      - the session ID (cookie) of the user who asked this.
+    * `interrupt_id` - ID of the interrupt if this response is a pause for user confirmation
+    * `session_id`   - Alias for session to maintain backward compatibility
+    * `messages`     - List of messages in the conversation history (optional)
     """
-    reply: str
+    reply: Any  # Can be string or structured data for special bubbles
     agent: str
-    messages: List[ChatMessage]
+    session: str
+    interrupt_id: Optional[str] = None
+    session_id: Optional[str] = None
+    messages: Optional[List[ChatMessage]] = None

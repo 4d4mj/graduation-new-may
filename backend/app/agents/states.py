@@ -1,5 +1,5 @@
 # app/agents/state.py
-from typing import Any, List
+from typing import Any, List, Optional
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 from typing_extensions import Annotated
@@ -38,3 +38,6 @@ def init_state_for_role(role: str) -> BaseAgentState:
         return DoctorState()
     else:
         return BaseAgentState()
+
+class SchedulerState(PatientState):          # or DoctorState
+    pending_booking: Optional[dict] = None   # {"doctor":..., "starts_at":...}

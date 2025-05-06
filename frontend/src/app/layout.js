@@ -1,4 +1,4 @@
-import 'regenerator-runtime/runtime'; // Add regenerator-runtime to avoid "regeneratorRuntime is not defined" error
+import 'regenerator-runtime/runtime';
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner"
 import "./globals.css";

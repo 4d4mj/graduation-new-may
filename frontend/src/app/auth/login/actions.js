@@ -27,5 +27,5 @@ export async function login(formData) {
 		return { errors: body.detail || "Invalid credentials" };
 	}
 
-	redirect("/dashboard");
+	redirect("/c");
 }

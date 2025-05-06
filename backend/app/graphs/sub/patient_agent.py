@@ -7,7 +7,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
 
 # local application imports
 from app.config.settings import settings
-# from app.agents.tools import small_talk
 from app.agents.states import PatientState
 from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment
 from typing import Sequence
@@ -15,7 +14,6 @@ from typing import Sequence
 logger = logging.getLogger(__name__)
 
 BASE_TOOLS = [
-    # small_talk,
     list_free_slots,
     book_appointment,
     cancel_appointment

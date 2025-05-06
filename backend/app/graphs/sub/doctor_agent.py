@@ -2,11 +2,6 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
-# ── built‑in tools
-# from app.agents.tools import (
-#     small_talk
-# )
-
 from app.agents.states import DoctorState
 
 from app.agents.tools import run_rag, run_web_search
@@ -16,7 +11,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 BASE_TOOLS = [
-    # small_talk,
     run_rag,
     run_web_search
 ]
@@ -24,9 +18,8 @@ BASE_TOOLS = [
 ASSISTANT_SYSTEM_PROMPT = """You are an AI assistant for healthcare professionals. You help doctors with information retrieval, scheduling, and administrative tasks.
 
 AVAILABLE TOOLS:
-1. small_talk - For handling general greetings and conversational exchanges
-2. run_rag - Primary knowledge retrieval tool that searches internal medical knowledge base
-3. run_web_search - Secondary search tool for when internal knowledge is insufficient
+1. run_rag - Primary knowledge retrieval tool that searches internal medical knowledge base
+2. run_web_search - Secondary search tool for when internal knowledge is insufficient
 
 INSTRUCTIONS:
 - Always introduce yourself as a medical office assistant

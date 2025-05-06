@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import ConversationArea from "./ConversationArea";
-import dynamic from "next/dynamic"
+import dynamic from "next/dynamic";
 import Navbar from "./Navbar";
+import settings from "@/config/settings";
 
-const ChatInput = dynamic(() => import("./ChatInput"), { ssr: false })
+const ChatInput = dynamic(() => import("./ChatInput"), { ssr: false });
 
 export default function Chat({ user }) {
 	const [input, setInput] = useState("");
-	const [messages, setMessages] = useState([]); // [{role, content}, …]
+	const [messages, setMessages] = useState([]);
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
@@ -20,26 +21,21 @@ export default function Chat({ user }) {
 		const newHistory = [...messages, userMsg];
 		setMessages(newHistory);
 
-		const historyPayload = messages; // our prior messages
 		const payload = {
 			message: input,
-			history: historyPayload,
+			user_tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
 		};
 
 		setInput("");
 
 		try {
-			// 2) call your backend; credentials: 'include' to send the session cookie
 			console.log("sending payload", payload);
 			const res = await fetch(
-				`${
-					process.env.NEXT_PUBLIC_API_URL || "http://backend:8000"
-				}/chat/`,
+				`${settings.apiUrl || "http://backend:8000"}/chat/`,
 				{
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					credentials: "include",
-					user_tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
 					body: JSON.stringify(payload),
 				}
 			);
@@ -51,6 +47,7 @@ export default function Chat({ user }) {
 				role: "assistant",
 				content: data.reply,
 				agent: data.agent,
+				interrupt_id: data.interrupt_id, // Store the interrupt ID if present
 			};
 			setMessages((m) => [...m, assistantMsg]);
 		} catch (err) {
@@ -65,7 +62,7 @@ export default function Chat({ user }) {
 	return (
 		<main className="grow flex flex-col items-center h-screen max-h-screen w-full bg-gray-400">
 			<Navbar {...{ user }} />
-			<ConversationArea {...{user, messages}} />
+			<ConversationArea {...{ user, setInput, messages }} />
 			<ChatInput {...{ input, setInput, handleSubmit }} />
 		</main>
 	);

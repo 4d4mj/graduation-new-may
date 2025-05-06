@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
-import ChatBubble from "./ChatBubble";
+import SpecialBubble from "./SpecialBubble";
 
-export default function ConversationArea({ user, messages }) {
+export default function ConversationArea({ user, setInput, messages }) {
 	const endRef = useRef(null);
 
 	// Scroll to bottom on new message
@@ -24,9 +24,9 @@ export default function ConversationArea({ user, messages }) {
 
 	return (
 		<div className="flex-1 w-full overflow-y-auto py-2 space-y-2">
-			<div className="w-full px-4 md:px-0 md:w-lg lg:w-xl xl:w-3xl mx-auto">
+			<div className="w-full px-4 md:px-0 md:w-lg lg:w-xl xl:w-3xl mx-auto space-y-4">
 				{messages.map((message, index) => (
-					<ChatBubble key={index} message={message} />
+					<SpecialBubble key={index} message={message} setInput={setInput} />
 				))}
 				<div ref={endRef} />
 			</div>

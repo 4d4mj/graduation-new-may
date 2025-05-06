@@ -4,7 +4,9 @@ from app.config.settings import env
 from langchain_core.messages import HumanMessage, BaseMessage
 from typing import List
 from app.core.auth import decode_access_token
-from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
+from app.schemas.chat import ChatRequest, ChatResponse
+from langgraph.errors import GraphInterrupt            # or GraphInterrupt
+from langgraph.types  import Command
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -34,29 +36,53 @@ async def chat(
         logger.error(f"Graph for role '{role}' not found!")
         raise HTTPException(500, f"Invalid role '{role}' or graph not initialized.")
 
-    # --- Prepare input for graph.ainvoke with checkpointer ---
-    graph_input = {
-        "messages": [HumanMessage(content=payload.message)],
-        "current_input": payload.message,  # Still useful for guard_in
-        "final_output": None,
-        "agent_name": None,
-        "user_id": user_id,
-        "user_tz": payload.user_tz,
-    }
+    # --- Handle resume with interrupt_id if present ---
+    if payload.interrupt_id:
+        logger.info(f"Resuming from interrupt: {payload.interrupt_id}")
+        cmd = Command(resume=payload.resume_value, interrupt_id=payload.interrupt_id)
 
-    # Define config for the graph invocation
-    config = {
-        "configurable": {
-            "thread_id": session
+        try:
+            final_state = await graph.ainvoke(cmd, config={
+                "configurable": {
+                    "thread_id": session
+                }
+            })
+        except Exception as e:
+            logger.exception(f"Error resuming graph execution: {e}")
+            raise HTTPException(500, f"Error resuming: {e}")
+    else:
+        # --- Prepare input for normal graph.ainvoke with checkpointer ---
+        graph_input = {
+            "messages": [HumanMessage(content=payload.message)],
+            "current_input": payload.message,  # Still useful for guard_in
+            "final_output": None,
+            "agent_name": None,
+            "user_id": user_id,
+            "user_tz": payload.user_tz,
         }
-    }
 
-    try:
-        final_state = await graph.ainvoke(graph_input, config=config)
+        # Define config for the graph invocation
+        config = {
+            "configurable": {
+                "thread_id": session
+            }
+        }
 
-    except Exception as e:
-        logger.exception("Error running graph")
-        raise HTTPException(500, f"Processing error: {e}")
+        try:
+            final_state = await graph.ainvoke(graph_input, config=config)
+        except GraphInterrupt as gi:
+            # Surface the interrupt payload to the UI
+            logger.info(f"Graph interrupted: {gi.value}")
+            return ChatResponse(
+                reply=gi.value,
+                agent="Scheduler",
+                interrupt_id=gi.ns[0],
+                messages=[],
+                session_id=session
+            )
+        except Exception as e:
+            logger.exception("Error running graph")
+            raise HTTPException(500, f"Processing error: {e}")
 
     # --- Process the final state ---
     # Extract the response from the final state
@@ -87,28 +113,15 @@ async def chat(
         agent_name = "Medical Assistant"  # Provide a default value to pass validation
         logger.warning("No agent_name was set in final state, using default: %s", agent_name)
 
-    # --- Build response history ---
-    # Use the history from the FINAL state managed by LangGraph/Checkpointer
-    response_messages = []
-    for msg in all_messages:
-        role = "user" if isinstance(msg, HumanMessage) else "assistant"
-        content = str(getattr(msg, 'content', ''))
-        # Basic filtering: Don't show empty messages
-        if content:
-            response_messages.append(ChatMessage(role=role, content=content))
-
     return ChatResponse(
         reply=reply,
         agent=agent_name,
-        messages=response_messages,
-        session_id=session,
+        session=session,
     )
 
 import random
 @router.post("/test", response_model=ChatResponse, status_code=200)
 async def testChat(
-    payload: ChatRequest,
-    request: Request,
     session: str | None = Cookie(default=None, alias="session")
 ):
     """
@@ -137,6 +150,8 @@ async def testChat(
         "Acknowledged. I'm accessing the relevant information now. This is a complex area, so accuracy is key.",
         "Let's break that down. The first aspect to consider is [...], followed by [...]. Does that make sense so far?",
     ])
+
+    reply = '{"type": "slots", "doctor": "Chen", "date": "May 6, 2025", "options": ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:30", "15:00", "15:30", "16:00", "16:30"]}'
     # Add a bit more context if needed, e.g., mentioning the user's message
     # reply = f"Regarding your message about '{payload.message[:30]}...': {reply}" # Optional: Add context
 
@@ -146,6 +161,5 @@ async def testChat(
     return ChatResponse(
         reply=reply,
         agent=agent_name,
-        session_id=session, # Return the session token received
-        messages=[]  # Include the simulated history
+        session=session, # Return the session token received
     )

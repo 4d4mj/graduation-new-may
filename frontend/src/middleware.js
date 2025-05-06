@@ -2,7 +2,7 @@ export const env = ['SESSION_SECRET'];   // 👈  make it visible to Edge
 import { NextResponse } from "next/server";
 import { decrypt } from "@lib/session";
 
-const protectedRoutes = ["/dashboard"];
+const protectedRoutes = ["/c"];
 const publicRoutes = ["/auth/login", "/auth/register"];
 
 export async function middleware(req) {
@@ -19,7 +19,7 @@ export async function middleware(req) {
 	}
 
 	if (isPublicRoute && session?.sub) {
-		return NextResponse.redirect(new URL("/dashboard", req.nextUrl));
+		return NextResponse.redirect(new URL("/c", req.nextUrl));
 	}
 
 	// attach header so downstream code can skip decrypting again

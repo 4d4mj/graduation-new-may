@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, END
 from app.agents.guardrails import guard_in, guard_out
 from app.agents.states import PatientState
 from app.graphs.sub import patient_agent
+from app.agents.scheduler.interrupt import confirm_booking
 import logging
 from typing import Literal  # <-- Import Literal
 
@@ -20,6 +21,18 @@ def route_after_guard_in(state: dict) -> Literal["agent", "__end__"]:
         # Input is safe, proceed to the agent
         logger.info("Input guardrail passed, routing to agent.")
         return "agent"
+# --- END ADDITION ---
+
+# --- ADD THIS ROUTING FUNCTION ---
+def route_after_agent(state: dict) -> Literal["confirm", "guard_out"]:
+    """Routes to confirmation if booking is detected, otherwise to output guardrail."""
+    # Check if a pending booking is detected in the state
+    if state.get("pending_booking"):
+        logger.info("Pending booking detected, routing to confirmation step.")
+        return "confirm"
+    else:
+        logger.info("No booking detected, routing to output guardrail.")
+        return "guard_out"
 # --- END ADDITION ---
 
 
@@ -41,6 +54,7 @@ def create_patient_graph() -> StateGraph:
     # Add nodes
     g.add_node("guard_in", guard_in)
     g.add_node("agent", patient_agent.medical_agent.ainvoke)
+    g.add_node("confirm", confirm_booking)
     g.add_node("guard_out", guard_out)
 
     # Set entry point
@@ -57,9 +71,20 @@ def create_patient_graph() -> StateGraph:
     )
     # --- END REPLACEMENT ---
 
-    # Remaining edges
-    g.add_edge("agent", "guard_out")
+    # --- ADD CONDITIONAL EDGE FROM AGENT TO EITHER CONFIRM OR GUARD_OUT ---
+    g.add_conditional_edges(
+        "agent",
+        route_after_agent,
+        {
+            "confirm": "confirm",   # If pending_booking exists, go to confirmation
+            "guard_out": "guard_out"  # Otherwise proceed to output guardrail
+        }
+    )
+    # --- END ADDITION ---
+
+    # Add edge from confirm to guard_out
+    g.add_edge("confirm", "guard_out")
     g.add_edge("guard_out", END)
 
-    logger.info("Patient graph created with conditional routing after input guardrail.")
+    logger.info("Patient graph created with booking confirmation flow.")
     return g

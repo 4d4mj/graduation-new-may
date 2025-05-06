@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, date, timedelta, timezone
+from babel.dates import format_date
 from zoneinfo import ZoneInfo
 import dateparser  # type: ignore
 
@@ -48,7 +49,7 @@ def _parse_day(text: str | None, user_tz: str | None) -> date:
     return parsed.date() if parsed else (base + timedelta(days=1)).date()
 
 
-@tool("list_free_slots", return_direct=True)
+@tool("list_free_slots")
 async def list_free_slots(
     doctor_name: str,
     day: str | None = None,
@@ -78,17 +79,14 @@ async def list_free_slots(
             logger.debug(f"Found slots: {slots}")
 
         if not slots:
-            return {
-                "type": "slots",
-                "doctor": doctor_name,
-                "date": target_day.isoformat(),
-                "options": [],
-            }
+            return "There was a problem checking the schedule. Please try again later."
 
         return {
             "type": "slots",
             "doctor": doctor_name,
-            "date": target_day.isoformat(),
+            "agent": "Scheduler",
+            "reply_template": "I choose the appointment slot at ",
+            "date": format_date(target_day, "long", locale="en") ,
             "options": slots,
         }
     except Exception as e:
@@ -98,7 +96,7 @@ async def list_free_slots(
         return error_msg
 
 
-@tool("book_appointment", return_direct=True)
+@tool("book_appointment")
 async def book_appointment(
     doctor_name: str,
     starts_at: str,
@@ -171,7 +169,7 @@ async def book_appointment(
         return "I encountered an error while trying to book the appointment. Please try again later."
 
 
-@tool("cancel_appointment", return_direct=True)
+@tool("cancel_appointment")
 async def cancel_appointment(
     appointment_id: int,
     patient_id: Annotated[int, InjectedState("user_id")],
