@@ -21,7 +21,7 @@ export async function sendChat(payload) {
   }
 
   try {
-    const res = await fetch(`${settings.apiUrl || "http://backend:8000"}/chat/`, {
+    const res = await fetch(`${settings.apiInternalUrl || "http://backend:8000"}/chat/`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

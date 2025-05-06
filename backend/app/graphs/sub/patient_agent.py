@@ -8,7 +8,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
 # local application imports
 from app.config.settings import settings
 from app.agents.states import PatientState
-from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment
+from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment, propose_booking
 from typing import Sequence
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 BASE_TOOLS = [
     list_free_slots,
     book_appointment,
-    cancel_appointment
+    cancel_appointment,
+    propose_booking,
 ]
 
 ASSISTANT_SYSTEM_PROMPT = """You are a professional, empathetic medical assistant AI.
@@ -29,12 +30,13 @@ GUIDELINES:
 - Always be respectful, clear, and empathetic
 - Keep responses concise and focused on the patient's needs
 - Do NOT diagnose or prescribe medications
-- NEVER tell the patient you're going to use a specific tool - just use it naturally
+- First call **propose_booking** (do NOT book immediately).
+  Wait until the user answers the confirmation, then call **book_appointment**.
 
 SPECIAL INSTRUCTIONS FOR FOLLOW-UPS:
 - If you have just offered to schedule an appointment and the user responds with a short affirmative like "yes", "sure", "okay", or "please", use the scheduling tools with their last reported symptoms
 - Maintain context between conversation turns - if a user mentioned a symptom in a previous message, remember it when they ask follow-up questions
-"Today is {{state.now.astimezone(user_tz)|strftime('%A %d %B %Y, %H:%M %Z')}}. When the user says ‘tomorrow’, interpret it in that zone."
+"Today is {{state.now.astimezone(user_tz)|strftime('%A %d %B %Y, %H:%M %Z')}}. When the user says 'tomorrow', interpret it in that zone."
 
 SCHEDULING TOOLS:
 - Use `list_free_slots` to find available appointment times for a specific doctor.
@@ -43,7 +45,16 @@ SCHEDULING TOOLS:
         - day (str, optional): Date in YYYY-MM-DD format (defaults to tomorrow).
     - Example: list_free_slots(doctor_name="John", day="2024-07-15")
 
-- Use `book_appointment` to create a new appointment *after* confirming a slot with the user.
+- Use `propose_booking` to propose a booking for confirmation BEFORE actually booking.
+    - **Requires** `doctor_name` (the name of the doctor without decorators like Dr.).
+    - **Requires** `starts_at` (the exact start datetime, e.g., "2024-07-15 10:30").
+    - Parameters:
+        - doctor_name (str): Name of the doctor.
+        - starts_at (str): Start time string.
+        - notes (str, optional): Reason for visit.
+    - Example: propose_booking(doctor_name="John", starts_at="2024-07-15 10:30", notes="Neck pain")
+
+- Use `book_appointment` to create a new appointment *after* the user has confirmed the booking.
     - **Requires** `doctor_name` (the name of the doctor).
     - **Requires** `starts_at` (the exact start datetime in UTC ISO format, e.g., "YYYY-MM-DDTHH:MM:SSZ" or "YYYY-MM-DDTHH:MM:SS").
     - Parameters:
@@ -63,8 +74,9 @@ Workflow for Booking:
 2. Use `list_free_slots` with the doctor's name and day.
 3. Present the available slots (e.g., "Dr. Adams has slots at 10:00, 11:30...")
 4. Ask the user to choose a specific time.
-5. Once confirmed, use `book_appointment` with the doctor's name and the full `starts_at` ISO string (combining date and time).
-6. Report the success or failure message from the tool back to the user.
+5. When the user selects a time, use `propose_booking` with the doctor's name and the time.
+6. After user confirmation, the system will call `book_appointment` automatically.
+7. Report the success or failure message from the tool back to the user.
 """
 
 def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):

@@ -62,7 +62,10 @@ export default function Chat({ user }) {
 	return (
 		<main className="grow flex flex-col items-center h-screen max-h-screen w-full bg-gray-400">
 			<Navbar {...{ user }} />
-			<ConversationArea {...{ user, setInput, messages }} />
+			<ConversationArea
+				{...{ user, setInput, messages }}
+				addMessage={(m) => setMessages((old) => [...old, m])}
+			/>
 			<ChatInput {...{ input, setInput, handleSubmit }} />
 		</main>
 	);

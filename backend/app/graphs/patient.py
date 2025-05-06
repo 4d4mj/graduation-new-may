@@ -4,7 +4,8 @@ from app.agents.states import PatientState
 from app.graphs.sub import patient_agent
 from app.agents.scheduler.interrupt import confirm_booking
 import logging
-from typing import Literal  # <-- Import Literal
+from typing import Literal
+from langchain_core.messages import ToolMessage
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -26,13 +27,19 @@ def route_after_guard_in(state: dict) -> Literal["agent", "__end__"]:
 # --- ADD THIS ROUTING FUNCTION ---
 def route_after_agent(state: dict) -> Literal["confirm", "guard_out"]:
     """Routes to confirmation if booking is detected, otherwise to output guardrail."""
-    # Check if a pending booking is detected in the state
-    if state.get("pending_booking"):
-        logger.info("Pending booking detected, routing to confirmation step.")
-        return "confirm"
-    else:
-        logger.info("No booking detected, routing to output guardrail.")
-        return "guard_out"
+    # Look for propose_booking tool messages in the state
+    for m in reversed(state["messages"]):
+        if isinstance(m, ToolMessage) and m.name == "propose_booking":
+            # Found a propose_booking message, set the pending_booking state and route to confirm
+            state["pending_booking"] = m.content
+            # Set the agent_name to "Scheduler" for better UI display
+            state["agent_name"] = "Scheduler"
+            logger.info(f"Detected propose_booking: {m.content}, routing to confirmation step")
+            return "confirm"
+
+    # No propose_booking detected, route to output guardrail
+    logger.info("No booking proposal detected, routing to output guardrail.")
+    return "guard_out"
 # --- END ADDITION ---
 
 

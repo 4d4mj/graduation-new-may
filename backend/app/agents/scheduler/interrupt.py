@@ -1,12 +1,10 @@
 from langgraph.types import interrupt
 import logging
 
-from app.agents.states import SchedulerState
-
 logger = logging.getLogger(__name__)
 
 
-def confirm_booking(state: SchedulerState):
+def confirm_booking(state):
     """
     Interrupt handler for booking confirmation.
     Pauses execution and returns control to user for confirmation.
@@ -18,7 +16,17 @@ def confirm_booking(state: SchedulerState):
     Returns:
         dict: Updated state with next actions based on user confirmation
     """
-    payload = state["pending_booking"]
+    # Use state.get() instead of direct dict access to avoid KeyError
+    payload = state.get("pending_booking")
+
+    if not payload:
+        # Handle case where pending_booking is missing
+        logger.error("confirm_booking called but no pending_booking found in state")
+        return {
+            "final_output": "I'm sorry, there was an error processing your booking request. Please try again.",
+            "agent_name": "Scheduler"
+        }
+
     logger.info(f"Interrupting for booking confirmation: {payload}")
 
     # This raises a GraphInterrupt that bubbles to the caller
@@ -34,9 +42,13 @@ def confirm_booking(state: SchedulerState):
             "messages": [],
             "extra_calls": [
                 ("book_appointment", payload)  # This will be executed by LangGraph after resume
-            ]
+            ],
+            "agent_name": "Scheduler"
         }
     else:
         # User declined - exit with a message
         logger.info("User declined booking, canceling operation")
-        return {"final_output": "Understood. No appointment has been booked."}
+        return {
+            "final_output": "Understood. No appointment has been booked.",
+            "agent_name": "Scheduler"
+        }

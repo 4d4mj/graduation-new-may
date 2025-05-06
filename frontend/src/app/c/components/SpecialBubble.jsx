@@ -12,7 +12,7 @@ import { flushSync } from "react-dom";
 import { Badge } from "@/components/ui/badge";
 import { sendChat } from "../actions";
 
-export default function SpecialBubble({ message, setInput }) {
+export default function SpecialBubble({ message, setInput, addMessage }) {
 	let payload;
 	try {
 		payload = JSON.parse(message.content);
@@ -53,10 +53,17 @@ export default function SpecialBubble({ message, setInput }) {
 						variant="outline"
 						onClick={async () => {
 							// Send "no" response back with the interrupt ID
-							await sendChat({
+							const res = await sendChat({
 								message: "No, I don't want to book this appointment.",
 								interrupt_id: message.interrupt_id,
 								resume_value: "no"
+							});
+
+							// Add the assistant's response to the messages
+							addMessage?.({
+								role: "assistant",
+								content: res.reply,
+								agent: res.agent,
 							});
 						}}
 					>
@@ -65,10 +72,17 @@ export default function SpecialBubble({ message, setInput }) {
 					<Button
 						onClick={async () => {
 							// Send "yes" response back with the interrupt ID
-							await sendChat({
+							const res = await sendChat({
 								message: "Yes, please book this appointment.",
 								interrupt_id: message.interrupt_id,
 								resume_value: "yes"
+							});
+
+							// Add the assistant's response to the messages
+							addMessage?.({
+								role: "assistant",
+								content: res.reply,
+								agent: res.agent,
 							});
 						}}
 					>
@@ -106,7 +120,7 @@ export default function SpecialBubble({ message, setInput }) {
 								className="w-full" /* make every btn fill its grid cell */
 								onClick={() => {
 									// synchronously update the input state before submitting
-									flushSync(() => setInput(payload.reply_template));
+									flushSync(() => setInput(payload.reply_template + opt));
 									document
 										.getElementById("chat-form")
 										?.requestSubmit();
