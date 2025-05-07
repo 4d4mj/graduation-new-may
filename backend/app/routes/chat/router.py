@@ -13,6 +13,27 @@ logger = logging.getLogger(__name__)
 
 secure_cookie = env == "production"
 
+# 1️⃣ Add a helper function to find the most recent tool message
+def _find_last_tool_or_ai_message(messages):
+    """
+    Find the most recent ToolMessage or AIMessage in the current turn.
+    ToolMessage takes precedence, but we never look beyond the most recent HumanMessage.
+
+    Args:
+        messages: List of conversation messages
+
+    Returns:
+        The content of the most relevant message for display
+    """
+    for m in reversed(messages):
+        if isinstance(m, ToolMessage):
+            return m.content  # ToolMessage (structured JSON) wins
+        if isinstance(m, HumanMessage):
+            break  # Stop at previous user turn - don't look across turns
+
+    # If we get here, there was no ToolMessage in the current turn
+    return messages[-1].content if messages else None  # Fallback to last message
+
 @router.post("/", response_model=ChatResponse, status_code=200)
 async def chat(
     payload: ChatRequest,
@@ -78,27 +99,17 @@ async def chat(
     # Extract the response from the final state
     all_messages: List[BaseMessage] = final_state.get("messages", [])
 
-    # Check for tool messages - these contain raw structured data
-    for message in reversed(all_messages):
-        if isinstance(message, ToolMessage):
-            # If the last message is from a tool, use its raw content directly
-            reply = message.content
-            logger.info(f"Using raw tool output as reply: {reply}")
-            break
+    # 2️⃣ Use the helper function instead of just looking at the last message
+    if all_messages:
+        reply = _find_last_tool_or_ai_message(all_messages)
+        logger.info(f"Selected message as reply using improved logic")
     else:
-        # Prioritize final_output if set (likely by guardrails)
+        reply = None
+
+    # 3️⃣ Prioritize guardrail output (final_output) if it exists
+    if final_state.get("final_output") is not None:
         reply = final_state.get("final_output")
-
-        # If guardrails didn't set final_output, get reply from the last message
-        if reply is None and all_messages:
-            last_message = all_messages[-1]
-            # Check if it's an AIMessage, not a ToolMessage or HumanMessage
-            if hasattr(last_message, 'content') and not isinstance(last_message, HumanMessage):
-                reply = str(last_message.content)
-            else:
-                logger.warning("Last message was not AI content, state: %s", final_state)
-
-    logger.info("Using reply: %s", reply)
+        logger.info("Using final_output from guardrails as reply")
 
     # Fallback reply
     if reply is None:  # Use 'is None' to handle potential empty string replies

@@ -6,14 +6,16 @@ import { redirect } from "next/navigation";
 import settings from "@/config/settings";
 
 export async function logout() {
-  const cookieStore = cookies();
+  // Properly await the cookies() call
+  const cookieStore = await cookies();
   cookieStore.delete("session");
   cookieStore.delete("refresh_token");
   redirect("/login");
 }
 
 export async function sendChat(payload) {
-  const cookieStore = cookies();
+  // Properly await the cookies() call
+  const cookieStore = await cookies();
   const session = cookieStore.get("session")?.value;
 
   if (!session) {

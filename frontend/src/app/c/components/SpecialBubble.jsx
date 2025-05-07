@@ -153,5 +153,41 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 		);
 	}
 
+	// add just after the "slots" handler
+	if (payload?.type === "doctors" && Array.isArray(payload.doctors)) {
+		return (
+			<Card className="max-w-xl">
+				<CardHeader>
+					<Badge
+						variant="secondary"
+						className="bg-gray-600 text-primary-foreground"
+					>
+						{payload.agent ?? "Scheduler"}
+					</Badge>
+					<CardTitle>Select a doctor</CardTitle>
+					<CardDescription>{payload.message}</CardDescription>
+				</CardHeader>
+				<CardContent className="grid gap-2">
+					{payload.doctors.map((doctor) => (
+						<Button
+							key={doctor.id}
+							onClick={() => {
+								// Use doctor ID instead of name in subsequent operations
+								flushSync(() =>
+									setInput(
+										`I'd like to book with doctor_id ${doctor.id} (${doctor.name})`
+									)
+								);
+								document.getElementById("chat-form")?.requestSubmit();
+							}}
+						>
+							{doctor.name} · {doctor.specialty}
+						</Button>
+					))}
+				</CardContent>
+			</Card>
+		);
+	}
+
 	return <ChatBubble message={message} />;
 }

@@ -280,9 +280,9 @@ async def get_doctor_availability(
     start_hour = 8
     end_hour = 17
 
-    # Get the start and end of the requested date
-    date_start = datetime(date.year, date.month, date.day, start_hour, 0)
-    date_end = datetime(date.year, date.month, date.day, end_hour, 0)
+    # Get the start and end of the requested date - MAKE TIMEZONE AWARE
+    date_start = datetime(date.year, date.month, date.day, start_hour, 0, tzinfo=timezone.utc)
+    date_end = datetime(date.year, date.month, date.day, end_hour, 0, tzinfo=timezone.utc)
 
     # Get existing appointments for the doctor on that date
     result = await db.execute(
@@ -296,7 +296,7 @@ async def get_doctor_availability(
     )
     existing_appointments = result.scalars().all()
 
-    # Create a list of all possible time slots
+    # Create a list of all possible time slots - MAKE TIMEZONE AWARE
     all_slots = []
     current_slot = date_start
     while current_slot < date_end:
@@ -310,7 +310,12 @@ async def get_doctor_availability(
         is_available = True
 
         for appointment in existing_appointments:
-            if slot < appointment.ends_at and slot_end > appointment.starts_at:
+            # Ensure appointment times are timezone-aware for comparison
+            appt_starts_at = appointment.starts_at
+            appt_ends_at = appointment.ends_at
+
+            # Compare timezone-aware datetimes
+            if slot < appt_ends_at and slot_end > appt_starts_at:
                 is_available = False
                 break
 
@@ -342,24 +347,31 @@ async def get_available_slots_for_day(
     """
     logger.info(f"Getting available slots for doctor {doctor_id} on {target_date}")
 
-    # Convert date to datetime for availability check
-    target_datetime = datetime.combine(target_date, time(0, 0))
+    try:
+        # Convert date to datetime for availability check with UTC timezone
+        target_datetime = datetime.combine(target_date, time(0, 0))
 
-    # Get available slots as datetime objects
-    available_slots = await get_doctor_availability(
-        db=db,
-        doctor_id=doctor_id,
-        date=target_datetime,
-        slot_duration=slot_duration
-    )
+        # Get available slots as datetime objects
+        available_slots = await get_doctor_availability(
+            db=db,
+            doctor_id=doctor_id,
+            date=target_datetime,
+            slot_duration=slot_duration
+        )
 
-    # Format times if requested
-    if format_time:
-        formatted_slots = []
-        for slot in available_slots:
-            # Format as "9:00 AM", "2:30 PM", etc.
-            formatted_time = slot.strftime("%-I:%M %p")
-            formatted_slots.append(formatted_time)
-        return formatted_slots
+        # Format times if requested
+        if format_time:
+            formatted_slots = []
+            for slot in available_slots:
+                # Format as "9:00 AM", "2:30 PM", etc.
+                formatted_time = slot.strftime("%-I:%M %p")
+                formatted_slots.append(formatted_time)
+            return formatted_slots
 
-    return available_slots
+        return available_slots
+
+    except Exception as e:
+        # Log the error but don't re-raise - return a properly structured error response
+        logger.error(f"Error getting available slots for doctor {doctor_id}: {e}", exc_info=True)
+        # Return empty list which will be handled by the tool to show "no slots available"
+        return []

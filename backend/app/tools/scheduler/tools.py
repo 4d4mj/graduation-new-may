@@ -122,25 +122,41 @@ async def list_free_slots(
     doctor_name : str  – Doctor's name to check (used if doctor_id not provided).
     day         : str  – ISO date (YYYY‑MM‑DD) or natural language date. Tomorrow by default.
     """
-    # determine target day
-    target_day = _parse_day(day, user_tz)
-
-    logger.info(f"Tool 'list_free_slots' called for doctor_id={doctor_id}, doctor_name={doctor_name} on {target_day}")
-
-    if not doctor_id and not doctor_name:
-        return {
-            "type": "error",
-            "message": "Please provide either a doctor ID or a doctor name."
-        }
-
     try:
+        # determine target day
+        target_day = _parse_day(day, user_tz)
+
+        # Make sure doctor_id is an integer if provided
+        if doctor_id is not None:
+            try:
+                doctor_id = int(doctor_id)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid doctor_id format: {doctor_id}, attempting to treat as name")
+                doctor_name = str(doctor_id)
+                doctor_id = None
+
+        logger.info(f"Tool 'list_free_slots' called for doctor_id={doctor_id}, doctor_name={doctor_name} on {target_day}")
+
+        if not doctor_id and not doctor_name:
+            return {
+                "type": "error",
+                "message": "Please provide either a doctor ID or a doctor name."
+            }
+
         async with tool_db_session() as db:
             # Find the doctor by ID or name
             doctor = None
             if doctor_id:
                 doctor = await find_doctors(db, doctor_id=doctor_id, return_single=True)
-            else:
-                doctor = await find_doctors(db, name=doctor_name, return_single=True)
+            elif doctor_name:
+                # Clean up the doctor_name - strip "Dr." prefix if present
+                cleaned_name = doctor_name
+                if cleaned_name.lower().startswith("dr."):
+                    cleaned_name = cleaned_name[3:].strip()
+                elif cleaned_name.lower().startswith("dr "):
+                    cleaned_name = cleaned_name[3:].strip()
+
+                doctor = await find_doctors(db, name=cleaned_name, return_single=True)
 
             if not doctor:
                 id_or_name = doctor_id if doctor_id else f"'{doctor_name}'"
@@ -170,9 +186,11 @@ async def list_free_slots(
             "options": slots,
         }
     except Exception as e:
+        # Log the error, but maintain the expected JSON structure with "type": "error"
         logger.error(f"Error executing list_free_slots tool: {e}", exc_info=True)
         error_msg = "I encountered an error while trying to check the schedule. Please try again later."
-        logger.info(f"Tool list_free_slots returning error: '{error_msg}'")
+        logger.info(f"Tool list_free_slots returning error with proper schema: '{error_msg}'")
+        # Return error in the expected schema format for UI
         return {"type": "error", "message": error_msg}
 
 
@@ -199,6 +217,15 @@ async def book_appointment(
     location         : str  – Location of the appointment (default: "Main Clinic").
     notes            : str  – Additional notes for the appointment.
     """
+    # Make sure doctor_id is an integer if provided
+    if doctor_id is not None:
+        try:
+            doctor_id = int(doctor_id)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid doctor_id format: {doctor_id}, attempting to treat as name")
+            doctor_name = str(doctor_id)
+            doctor_id = None
+
     logger.info(f"Tool 'book_appointment' called by user {patient_id} for doctor_id={doctor_id}, doctor_name={doctor_name} at {starts_at}")
 
     if not doctor_id and not doctor_name:
@@ -242,8 +269,15 @@ async def book_appointment(
             doctor = None
             if doctor_id:
                 doctor = await find_doctors(db, doctor_id=doctor_id, return_single=True)
-            else:
-                doctor = await find_doctors(db, name=doctor_name, return_single=True)
+            elif doctor_name:
+                # Clean up the doctor_name - strip "Dr." prefix if present
+                cleaned_name = doctor_name
+                if cleaned_name.lower().startswith("dr."):
+                    cleaned_name = cleaned_name[3:].strip()
+                elif cleaned_name.lower().startswith("dr "):
+                    cleaned_name = cleaned_name[3:].strip()
+
+                doctor = await find_doctors(db, name=cleaned_name, return_single=True)
 
             if not doctor:
                 id_or_name = doctor_id if doctor_id else f"'{doctor_name}'"
@@ -337,6 +371,15 @@ async def propose_booking(
     starts_at   : str  – Proposed start time of the appointment.
     notes       : str  – Additional notes for the appointment.
     """
+    # Make sure doctor_id is an integer if provided
+    if doctor_id is not None:
+        try:
+            doctor_id = int(doctor_id)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid doctor_id format: {doctor_id}, attempting to treat as name")
+            doctor_name = str(doctor_id)
+            doctor_id = None
+
     if not doctor_id and not doctor_name:
         return {"type": "error", "message": "Please provide either a doctor ID or a doctor name."}
 
@@ -351,8 +394,15 @@ async def propose_booking(
             doctor = None
             if doctor_id:
                 doctor = await find_doctors(db, doctor_id=doctor_id, return_single=True)
-            else:
-                doctor = await find_doctors(db, name=doctor_name, return_single=True)
+            elif doctor_name:
+                # Clean up the doctor_name - strip "Dr." prefix if present
+                cleaned_name = doctor_name
+                if cleaned_name.lower().startswith("dr."):
+                    cleaned_name = cleaned_name[3:].strip()
+                elif cleaned_name.lower().startswith("dr "):
+                    cleaned_name = cleaned_name[3:].strip()
+
+                doctor = await find_doctors(db, name=cleaned_name, return_single=True)
 
         if doctor:
             full_name = f"Dr. {doctor.first_name} {doctor.last_name}"
