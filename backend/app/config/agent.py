@@ -25,7 +25,7 @@ class RAGSettings(BaseSettings):
     embedding_dim: int = 1536
 
     # retrieval
-    min_retrieval_confidence: float = 0.80
+    min_retrieval_confidence: float = 0.75
     context_limit: int = 20
     insufficient_info_keywords: list[str] = [
         "don't have enough information",
