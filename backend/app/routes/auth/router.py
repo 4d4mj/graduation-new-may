@@ -1,17 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from sqlalchemy import select
-from app.core.auth import decode_access_token, create_access_token
+from app.core.auth import create_tokens_for_user
 from app.db.models.user import UserModel
 from app.config.settings import env, settings
-from app.routes.auth.services import create_user, authenticate_user, create_tokens_for_user
+from app.db.crud.auth import create_user, authenticate_user, get_user_from_token, refresh_user_token
 from app.schemas.register_request import RegisterRequest
 from app.schemas.login_request import LoginRequest
 from app.schemas.auth_response import AuthResponse
-from app.main import get_db
-from jose import JWTError
-from datetime import timedelta
+from app.core.middleware import get_db
 from app.schemas.shared import UserOut as User
 
 router = APIRouter(
@@ -88,27 +84,12 @@ async def refresh(
     refresh_token: str = Cookie(None),
     db: AsyncSession = Depends(get_db)
 ):
-    if not refresh_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
-    try:
-        payload = decode_access_token(refresh_token)
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    user = await db.get(UserModel, int(payload.get("sub")))
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    # issue new tokens
-    access_token = create_access_token(
-        data={"sub": str(user.id), "role": user.role},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes)
-    )
-    new_refresh = create_access_token(
-        data={"sub": str(user.id)},
-        expires_delta=timedelta(days=settings.refresh_token_expire_days)
-    )
+    tokens = await refresh_user_token(db, refresh_token)
+
+    # Set HttpOnly cookies
     response.set_cookie(
         key="session",
-        value=access_token,
+        value=tokens.access_token,
         httponly=True,
         secure=secure_cookie,
         samesite="lax",
@@ -116,18 +97,13 @@ async def refresh(
     )
     response.set_cookie(
         key="refresh",
-        value=new_refresh,
+        value=tokens.refresh_token,
         httponly=True,
         secure=secure_cookie,
         samesite="lax",
         max_age=settings.refresh_token_expire_days * 86400
     )
-    return AuthResponse(
-        access_token=access_token,
-        refresh_token=new_refresh,
-        token_type="bearer",
-        expires_in=settings.access_token_expire_minutes * 60
-    )
+    return tokens
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(response: Response):
@@ -140,21 +116,4 @@ async def me(
     session: str = Cookie(None),  # bind the "session" cookie
     db: AsyncSession = Depends(get_db)
 ):
-    if not session:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    try:
-        payload = decode_access_token(session)  # decode the JWT token to get user info
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    user = await db.scalar(                          # ② scalar() → single row
-        select(UserModel)
-        .options(
-            selectinload(UserModel.patient_profile), # eager load relations
-            selectinload(UserModel.doctor_profile),
-        )
-        .where(UserModel.id == int(payload["sub"]))
-    )
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    return User.model_validate(user, from_attributes=True)
+    return await get_user_from_token(db, session)

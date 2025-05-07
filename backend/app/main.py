@@ -6,17 +6,18 @@ import logging
 from app.config.settings import settings
 from app.db.base import get_engine
 from app.db.base import get_session_factory
-from app.db.session import get_db_session, set_global_session_factory
+from app.db.session import set_global_session_factory
 from app.graphs.patient import create_patient_graph
 from app.graphs.doctor import create_doctor_graph
+from app.core.middleware import verify_token_middleware
 
 # Optional: generic MCP (e.g. Tavily) -------------------------------------------------
 from app.config.mcp import load_mcp_config
 from app.core.mcp import MCPToolManager
 
 # LangGraph orchestration -------------------------------------------------------------
-from app.graphs.sub import patient_agent
-from app.graphs.sub import doctor_agent
+from app.graphs.agents import patient_agent
+from app.graphs.agents import doctor_agent
 from langgraph.checkpoint.memory import MemorySaver
 
 # -------------------------------------------------------------------------------------
@@ -32,11 +33,6 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------------------------------------------
 # FastAPI helpers
 # -------------------------------------------------------------------------------------
-async def get_db(request: Request):
-    """Yield an async SQLAlchemy session (dependency)."""
-    async for session in get_db_session(request):
-        yield session
-
 def init_graphs():
     """Initialize the graphs for each role with checkpointers."""
     patient_checkpointer = MemorySaver()  # Explicitly set state_class to dict
@@ -140,6 +136,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Authentication middleware ----------------------------------------------------------
+app.middleware("http")(verify_token_middleware)
+
 
 # ----------------------------------------------------------------- health‑check -----
 @app.get("/health")
@@ -162,6 +161,8 @@ async def health_check(request: Request):
 # ------------------------------------------------------------------- routes ---------
 from app.routes.auth.router import router as auth_router  # noqa: E402  (after app creation)
 from app.routes.chat.router import router as chat_router  # noqa: E402
+from app.routes.appointment.router import router as appointment_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(chat_router)
+app.include_router(appointment_router)

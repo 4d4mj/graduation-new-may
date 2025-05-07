@@ -20,12 +20,12 @@ from app.db.base import get_engine as create_async_engine_from_url
 
 # Import PGVector specifically for patching
 from langchain_postgres.vectorstores import PGVector
-from app.agents.rag.vector_store import (
+from app.tools.rag.vector_store import (
     initialize_vector_store,
     add_documents_to_vector_store,
     get_vector_store,
 )
-from app.agents.rag.document_processor import MedicalDocumentProcessor
+from app.tools.rag.document_processor import MedicalDocumentProcessor
 from app.core.models import get_embedding_model
 
 # --- Logging Setup ---

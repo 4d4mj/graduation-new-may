@@ -20,18 +20,22 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 		payload = null;
 	}
 
-	if (payload?.type === "confirm_booking" && payload.doctor && payload.starts_at) {
+	if (
+		payload?.type === "confirm_booking" &&
+		payload.doctor &&
+		payload.starts_at
+	) {
 		// Format the date and time for display
 		const appointmentDate = new Date(payload.starts_at);
 		const formattedDate = appointmentDate.toLocaleDateString(undefined, {
-			weekday: 'long',
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric'
+			weekday: "long",
+			year: "numeric",
+			month: "long",
+			day: "numeric",
 		});
 		const formattedTime = appointmentDate.toLocaleTimeString(undefined, {
-			hour: '2-digit',
-			minute: '2-digit'
+			hour: "2-digit",
+			minute: "2-digit",
 		});
 
 		return (
@@ -45,7 +49,8 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 					</Badge>
 					<CardTitle>Confirm Your Appointment</CardTitle>
 					<CardDescription>
-						Would you like to book an appointment with Dr. {payload.doctor} on {formattedDate} at {formattedTime}?
+						Would you like to book an appointment with Dr.{" "}
+						{payload.doctor} on {formattedDate} at {formattedTime}?
 					</CardDescription>
 				</CardHeader>
 				<CardFooter className="flex gap-2 justify-end">
@@ -54,9 +59,15 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 						onClick={async () => {
 							// Send "no" response back with the interrupt ID
 							const res = await sendChat({
-								message: "No, I don't want to book this appointment.",
+								message:
+									"No, I don't want to book this appointment.",
 								interrupt_id: message.interrupt_id,
-								resume_value: "no"
+								resume_value: "no",
+							});
+
+							addMessage?.({
+								role: "user",
+								content: "No, I don't want to book this appointment.",
 							});
 
 							// Add the assistant's response to the messages
@@ -75,7 +86,12 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 							const res = await sendChat({
 								message: "Yes, please book this appointment.",
 								interrupt_id: message.interrupt_id,
-								resume_value: "yes"
+								resume_value: "yes",
+							});
+
+							addMessage?.({
+								role: "user",
+								content: "Yes, please book this appointment.",
 							});
 
 							// Add the assistant's response to the messages
@@ -107,7 +123,7 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 					)}
 					<CardTitle>Please Select an Appointment Slot</CardTitle>
 					<CardDescription>
-						Dr. {payload.doctor} on {payload.date}
+						{payload.doctor} on {payload.date}
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -120,7 +136,9 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 								className="w-full" /* make every btn fill its grid cell */
 								onClick={() => {
 									// synchronously update the input state before submitting
-									flushSync(() => setInput(payload.reply_template + opt));
+									flushSync(() =>
+										setInput(payload.reply_template + opt)
+									);
 									document
 										.getElementById("chat-form")
 										?.requestSubmit();

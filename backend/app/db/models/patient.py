@@ -19,3 +19,4 @@ class PatientModel(Base):
     address    = Column(String(255))
 
     user = relationship("UserModel", back_populates="patient_profile")
+    allergies = relationship("AllergyModel", back_populates="patient", cascade="all, delete-orphan")

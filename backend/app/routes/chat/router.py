@@ -1,9 +1,9 @@
 import logging
-from fastapi import APIRouter, HTTPException, Cookie, Request
+from fastapi import APIRouter, HTTPException, Cookie, Request, Depends
 from app.config.settings import env
 from langchain_core.messages import HumanMessage, BaseMessage, ToolMessage
 from typing import List
-from app.core.auth import decode_access_token
+from app.core.middleware import get_current_user
 from app.schemas.chat import ChatRequest, ChatResponse
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
@@ -17,18 +17,12 @@ secure_cookie = env == "production"
 async def chat(
     payload: ChatRequest,
     request: Request,
+    current_user: dict = Depends(get_current_user),
     session: str | None = Cookie(default=None, alias="session")
 ):
-
-    # authentication check
-    if session is None:
-        raise HTTPException(401, "Not authenticated")
-    try:
-        token = decode_access_token(session)
-        user_id = token.get("sub")
-        role = token["role"]
-    except Exception:
-        raise HTTPException(401, "Invalid session token")
+    # Use the user data from middleware instead of decoding the token again
+    user_id = current_user["user_id"]
+    role = current_user["role"]
 
     # Get the graph from app.state
     graph = request.app.state.graphs.get(role)
@@ -126,22 +120,14 @@ async def chat(
 import random
 @router.post("/test", response_model=ChatResponse, status_code=200)
 async def testChat(
+    current_user: dict = Depends(get_current_user),
     session: str | None = Cookie(default=None, alias="session")
 ):
     """
     Simulates a more realistic chat interaction for UI testing.
     Includes mock history and varied, longer responses.
     """
-    # --- Authentication Check ---
-    if session is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        # Replace with your actual token validation logic
-        user_info = decode_access_token(session)
-        # You might use user_info later if needed
-    except Exception as e:
-        # Log the error e for debugging if necessary
-        raise HTTPException(status_code=401, detail="Invalid session token")
+    # We're now using the middleware for authentication, no need to decode the token again
 
     # --- Simulate Realistic Interaction ---
     # Select a random realistic reply
@@ -156,10 +142,8 @@ async def testChat(
     ])
 
     reply = '{"type": "slots", "doctor": "Chen", "date": "May 6, 2025", "options": ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:30", "15:00", "15:30", "16:00", "16:30"]}'
-    # Add a bit more context if needed, e.g., mentioning the user's message
-    # reply = f"Regarding your message about '{payload.message[:30]}...': {reply}" # Optional: Add context
 
-    agent_name = "Medical Assistant" # Or make this dynamic if needed
+    agent_name = "Medical Assistant"
 
     # --- Return Response ---
     return ChatResponse(

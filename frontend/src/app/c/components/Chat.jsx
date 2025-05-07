@@ -60,7 +60,7 @@ export default function Chat({ user }) {
 	};
 
 	return (
-		<main className="grow flex flex-col items-center h-screen max-h-screen w-full bg-gray-400">
+		<main className="grow flex flex-col items-center h-screen max-h-screen w-full">
 			<Navbar {...{ user }} />
 			<ConversationArea
 				{...{ user, setInput, messages }}

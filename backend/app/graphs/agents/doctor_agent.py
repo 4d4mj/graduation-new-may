@@ -2,9 +2,9 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
-from app.agents.states import DoctorState
+from app.graphs.states import DoctorState
 
-from app.agents.tools import run_rag, run_web_search
+from app.tools.research.tools import run_rag, run_web_search
 from typing import Sequence
 import logging
 

@@ -7,13 +7,14 @@ from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
 
 # local application imports
 from app.config.settings import settings
-from app.agents.states import PatientState
-from app.agents.scheduler.tools import list_free_slots, book_appointment, cancel_appointment, propose_booking
+from app.graphs.states import PatientState
+from app.tools.scheduler.tools import list_free_slots, book_appointment, cancel_appointment, propose_booking, list_doctors
 from typing import Sequence
 
 logger = logging.getLogger(__name__)
 
 BASE_TOOLS = [
+    list_doctors,
     list_free_slots,
     book_appointment,
     cancel_appointment,
@@ -39,31 +40,38 @@ SPECIAL INSTRUCTIONS FOR FOLLOW-UPS:
 "Today is {{state.now.astimezone(user_tz)|strftime('%A %d %B %Y, %H:%M %Z')}}. When the user says 'tomorrow', interpret it in that zone."
 
 SCHEDULING TOOLS:
+- Use `list_doctors` to find doctors by name or specialty.
+    - Parameters:
+        - name (str, optional): Doctor's name (or part of it) to search for.
+        - specialty (str, optional): Medical specialty to filter doctors.
+        - limit (int, optional): Maximum number of doctors to return (default: 5).
+    - Example: list_doctors(name="Chen") or list_doctors(specialty="Cardiology")
+    - The response includes doctor_id which you should use in subsequent operations.
+
 - Use `list_free_slots` to find available appointment times for a specific doctor.
     - Parameters:
-        - doctor_name (str, optional): The name of the doctor you want to check availability for (without decorators like Dr. or dr).
+        - doctor_id (int, optional): The ID of the doctor to check availability for (preferred if available).
+        - doctor_name (str, optional): The name of the doctor (used if doctor_id not provided).
         - day (str, optional): Date in YYYY-MM-DD format (defaults to tomorrow).
-    - Example: list_free_slots(doctor_name="John", day="2024-07-15")
+    - Example: list_free_slots(doctor_id=42, day="2024-07-15") or list_free_slots(doctor_name="Chen", day="2024-07-15")
 
 - Use `propose_booking` to propose a booking for confirmation BEFORE actually booking.
-    - **Requires** `doctor_name` (the name of the doctor without decorators like Dr.).
-    - **Requires** `starts_at` (the exact start datetime, e.g., "2024-07-15 10:30").
     - Parameters:
-        - doctor_name (str): Name of the doctor.
+        - doctor_id (int, optional): The ID of the doctor (preferred if available).
+        - doctor_name (str, optional): Name of the doctor (used if doctor_id not provided).
         - starts_at (str): Start time string.
         - notes (str, optional): Reason for visit.
-    - Example: propose_booking(doctor_name="John", starts_at="2024-07-15 10:30", notes="Neck pain")
+    - Example: propose_booking(doctor_id=42, starts_at="2024-07-15 10:30", notes="Neck pain")
 
 - Use `book_appointment` to create a new appointment *after* the user has confirmed the booking.
-    - **Requires** `doctor_name` (the name of the doctor).
-    - **Requires** `starts_at` (the exact start datetime in UTC ISO format, e.g., "YYYY-MM-DDTHH:MM:SSZ" or "YYYY-MM-DDTHH:MM:SS").
     - Parameters:
-        - doctor_name (str): Name of the doctor.
+        - doctor_id (int, optional): The ID of the doctor (preferred if available).
+        - doctor_name (str, optional): Name of the doctor (used if doctor_id not provided).
         - starts_at (str): Full start datetime string (ISO format, UTC).
         - duration_minutes (int, optional): Default 30.
         - location (str, optional): Default "Main Clinic".
         - notes (str, optional): Reason for visit.
-    - Example: book_appointment(doctor_name="John", starts_at="2024-07-15T10:30:00Z", notes="Neck pain")
+    - Example: book_appointment(doctor_id=42, starts_at="2024-07-15T10:30:00Z", notes="Neck pain")
 
 - Use `cancel_appointment` to cancel an existing appointment.
     - **Requires** `appointment_id` (the ID of the appointment itself).
@@ -71,12 +79,13 @@ SCHEDULING TOOLS:
 
 Workflow for Booking:
 1. Ask the user which doctor they want to see and for which day.
-2. Use `list_free_slots` with the doctor's name and day.
-3. Present the available slots (e.g., "Dr. Adams has slots at 10:00, 11:30...")
-4. Ask the user to choose a specific time.
-5. When the user selects a time, use `propose_booking` with the doctor's name and the time.
-6. After user confirmation, the system will call `book_appointment` automatically.
-7. Report the success or failure message from the tool back to the user.
+2. Use `list_doctors` to find the correct doctor if the user provides a name or specialty.
+3. Use `list_free_slots` with the doctor's ID (preferred) or name and day.
+4. Present the available slots (e.g., "Dr. Adams has slots at 10:00, 11:30...")
+5. Ask the user to choose a specific time.
+6. When the user selects a time, use `propose_booking` with the doctor's ID (preferred) or name and the time.
+7. After user confirmation, use `book_appointment` with the same parameters.
+8. Report the success or failure message from the tool back to the user.
 """
 
 def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):

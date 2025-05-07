@@ -3,7 +3,7 @@ from langchain_core.tools import tool
 from typing import Optional
 from langchain_core.messages import AIMessage
 # ─── RAG & search helpers ──────────────────────────────────────────────────
-from app.agents.rag.core import MedicalRAG          # trimmed‑down version below
+from app.tools.research.core import MedicalRAG          # trimmed‑down version below
 from langchain_community.tools.tavily_search import TavilySearchResults
 
 logger = logging.getLogger(__name__)

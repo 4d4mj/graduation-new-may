@@ -8,7 +8,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
 # Make sure PatientState is imported if needed for type hints later, though not strictly needed here
-from app.agents.states import BaseAgentState
+from app.graphs.states import BaseAgentState
 
 log = logging.getLogger(__name__)
 
