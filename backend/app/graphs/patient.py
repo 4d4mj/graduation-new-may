@@ -78,9 +78,31 @@ def structured_output(state: dict) -> dict:
 
     return state
 
+# New node to process tool outputs and update the graph structure to handle direct tool responses, ensuring raw outputs are returned when necessary.
+def process_tool_output_node(state: PatientState):
+    """
+    Inspects the last message (ToolMessage). If from a DIRECT_OUTPUT_TOOL,
+    prepares raw output. Otherwise, prepares for LLM to process.
+    """
+    last_message = state.messages[-1]
+    state.is_direct_tool_response = False  # Default
+
+    if isinstance(last_message, ToolMessage):
+        if last_message.name in DIRECT_TO_UI:
+            tool_content = last_message.content
+            state.raw_tool_output = tool_content  # Store raw output
+            state.is_direct_tool_response = True
+
+# Routing function after processing tool output
+def route_after_tool_processing(state: PatientState) -> str:
+    """Decides where to go after processing the tool's output."""
+    if state.is_direct_tool_response:
+        return "structured_output"  # End graph execution, raw tool output is ready
+    return "agent"  # Continue processing with agent
+
 def create_patient_graph() -> StateGraph:
     """
-    Create a streamlined patient orchestrator graph.
+    Create a streamlined patient orchestrator graph with direct tool output handling.
 
     Flow:
     1. Apply input guardrails
@@ -99,6 +121,7 @@ def create_patient_graph() -> StateGraph:
     g.add_node("guard_in", guard_in)
     g.add_node("agent", patient_agent.medical_agent.ainvoke)
     g.add_node("tools", lambda state: state)  # LangGraph will fill this with tool execution
+    g.add_node("process_tool_output", process_tool_output_node)
     g.add_node("confirm", confirm_booking)
     g.add_node("guard_out", guard_out)
     g.add_node("structured_output", structured_output)  # Direct structured output node
@@ -127,14 +150,17 @@ def create_patient_graph() -> StateGraph:
         },
     )
 
-    # Route after tools based on message type
+    # Add edge from tools to process_tool_output
+    g.add_edge("tools", "process_tool_output")
+
+    # Conditional edge from process_tool_output
     g.add_conditional_edges(
-        "tools",
-        route_after_tools,
+        "process_tool_output",
+        route_after_tool_processing,
         {
             "structured_output": "structured_output",  # Direct structured output to frontend
-            "agent": "agent"                          # Continue processing with agent
-        }
+            "agent": "agent",                          # Continue processing with agent
+        },
     )
 
     # Add edge from structured_output directly to END (bypassing guard_out)

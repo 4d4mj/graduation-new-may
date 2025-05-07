@@ -23,10 +23,6 @@ class PatientState(BaseAgentState):
     request_scheduling: bool = False
     next_agent: str | None = None
     remaining_steps: int = 10
-    # To store the raw output of a tool intended for direct frontend consumption
-    raw_tool_output: Any = None
-    # Flag to indicate that the response is a direct tool output
-    is_direct_tool_response: bool = False
 
 class DoctorState(BaseAgentState):
     # ─── doctor-only fields ───────────────────────────────────
