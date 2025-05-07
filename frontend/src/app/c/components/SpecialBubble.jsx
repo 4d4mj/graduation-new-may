@@ -11,8 +11,11 @@ import {
 import { flushSync } from "react-dom";
 import { Badge } from "@/components/ui/badge";
 import { sendChat } from "../actions";
+import { useState } from "react";
 
 export default function SpecialBubble({ message, setInput, addMessage }) {
+	const [isDisabled, setIsDisabled] = useState(false);
+
 	let payload;
 	try {
 		payload = JSON.parse(message.content);
@@ -20,24 +23,24 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 		payload = null;
 	}
 
+	if (isDisabled) {
+		return (
+			<Card className="max-w-xl">
+				<CardHeader>
+					<CardTitle>Processing...</CardTitle>
+					<CardDescription>
+						Your response is being processed. Please wait.
+					</CardDescription>
+				</CardHeader>
+			</Card>
+		);
+	}
+
 	if (
 		payload?.type === "confirm_booking" &&
 		payload.doctor &&
 		payload.starts_at
 	) {
-		// Format the date and time for display
-		const appointmentDate = new Date(payload.starts_at);
-		const formattedDate = appointmentDate.toLocaleDateString(undefined, {
-			weekday: "long",
-			year: "numeric",
-			month: "long",
-			day: "numeric",
-		});
-		const formattedTime = appointmentDate.toLocaleTimeString(undefined, {
-			hour: "2-digit",
-			minute: "2-digit",
-		});
-
 		return (
 			<Card className="max-w-xl">
 				<CardHeader>
@@ -49,14 +52,14 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 					</Badge>
 					<CardTitle>Confirm Your Appointment</CardTitle>
 					<CardDescription>
-						Would you like to book an appointment with Dr.{" "}
-						{payload.doctor} on {formattedDate} at {formattedTime}?
+						Would you like to book an appointment with {payload.doctor} {payload.starts_at}?
 					</CardDescription>
 				</CardHeader>
 				<CardFooter className="flex gap-2 justify-end">
 					<Button
 						variant="outline"
 						onClick={async () => {
+							setIsDisabled(true);
 							// Send "no" response back with the interrupt ID
 							const res = await sendChat({
 								message:
@@ -82,6 +85,7 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 					</Button>
 					<Button
 						onClick={async () => {
+							setIsDisabled(true);
 							// Send "yes" response back with the interrupt ID
 							const res = await sendChat({
 								message: "Yes, please book this appointment.",
@@ -123,7 +127,7 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 					)}
 					<CardTitle>Please Select an Appointment Slot</CardTitle>
 					<CardDescription>
-						{payload.doctor} on {payload.date}
+						{payload.doctor}
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -135,6 +139,7 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 								type="button"
 								className="w-full" /* make every btn fill its grid cell */
 								onClick={() => {
+									setIsDisabled(true);
 									// synchronously update the input state before submitting
 									flushSync(() =>
 										setInput(payload.reply_template + opt)
@@ -185,6 +190,26 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 						</Button>
 					))}
 				</CardContent>
+			</Card>
+		);
+	}
+
+	if (payload?.status === "confirmed" && payload.id) {
+
+		return (
+			<Card className="max-w-xl">
+				<CardHeader>
+					<Badge
+						variant="secondary"
+						className="capitalize bg-green-600 text-primary-foreground"
+					>
+						Confirmation
+					</Badge>
+					<CardTitle>Appointment Confirmed</CardTitle>
+					<CardDescription>
+						Your appointment with {payload.doctor_name} is confirmed for {payload.start_dt}.
+					</CardDescription>
+				</CardHeader>
 			</Card>
 		);
 	}

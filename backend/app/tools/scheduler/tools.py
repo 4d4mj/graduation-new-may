@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, date, timedelta, timezone
-from babel.dates import format_date # type: ignore
+from babel.dates import format_date, format_datetime # type: ignore
 from zoneinfo import ZoneInfo
 import dateparser  # type: ignore
 from typing import Optional, Dict, Any, Union, List
@@ -310,7 +310,7 @@ async def book_appointment(
                 "id": appointment.id,
                 "doctor_id": doctor.user_id,
                 "doctor_name": f"Dr. {doctor.first_name} {doctor.last_name}",
-                "message": f"Your appointment (ID {appointment.id}) with Dr. {doctor.first_name} {doctor.last_name} on {start_dt:%Y‑%m‑%d at %H:%M %Z} is confirmed 🎉."
+                "start_dt": format_datetime(start_dt, 'long', locale='en')
             }
 
     except Exception as e:
