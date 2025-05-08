@@ -7,10 +7,11 @@ from sqlalchemy import select, insert, delete, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from fastapi import HTTPException
+from babel.dates import format_datetime
+from app.db.crud.user import get_user
 
 from app.db.models.appointment import AppointmentModel
 from app.db.models.user import UserModel
-from app.db.crud.user import get_user
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +96,9 @@ async def get_appointments(
     patient_id: Optional[int] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None
-) -> List[AppointmentModel]:
+) -> List[Dict[str, Any]]:
     """
-    Get appointments based on filters with role-based access control
+    Get appointments based on filters with role-based access control and enhanced response.
 
     Args:
         db: Database session
@@ -111,23 +112,23 @@ async def get_appointments(
         date_to: Filter by appointments starting at or before this date
 
     Returns:
-        List of appointments
+        List of appointments with formatted dates and doctor profiles.
     """
     query = select(AppointmentModel)
 
     # Apply role-based filtering
     if role == "doctor":
-        query = query.where(AppointmentModel.doctor_id == user_id)
+        query = query.where(AppointmentModel.doctor_id == int(user_id))
     elif role == "patient":
-        query = query.where(AppointmentModel.patient_id == user_id)
+        query = query.where(AppointmentModel.patient_id == int(user_id))
     elif role != "admin":
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     # Apply optional filters
     if doctor_id:
-        query = query.where(AppointmentModel.doctor_id == doctor_id)
+        query = query.where(AppointmentModel.doctor_id == int(doctor_id))
     if patient_id:
-        query = query.where(AppointmentModel.patient_id == patient_id)
+        query = query.where(AppointmentModel.patient_id == int(patient_id))
     if date_from:
         query = query.where(AppointmentModel.starts_at >= date_from)
     if date_to:
@@ -135,7 +136,38 @@ async def get_appointments(
 
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    appointments = result.scalars().all()
+
+    enhanced_appointments = []
+    for appointment in appointments:
+        # Fetch the doctor profile
+        doctor = await get_user(db, appointment.doctor_id)
+        if not doctor or not doctor.doctor_profile:
+            continue  # Skip appointments with missing doctor profiles
+
+        logger.info(f"Doctor profile for appointment ID {appointment.id}: {doctor.doctor_profile}")
+
+        logger.debug(f"Processing appointment ID {appointment.id}")
+        logger.debug(f"Doctor data: {doctor}")
+        logger.debug(f"Doctor profile: {doctor.doctor_profile}")
+
+        enhanced_appointments.append({
+            "id": appointment.id,
+            "patient_id": appointment.patient_id,
+            "doctor_id": appointment.doctor_id,  # Add doctor_id to the response
+            "doctor_profile": {
+                "first_name": doctor.doctor_profile.first_name,
+                "last_name": doctor.doctor_profile.last_name,
+                "specialty": doctor.doctor_profile.specialty
+            },
+            "starts_at": appointment.starts_at,  # Return datetime object
+            "ends_at": appointment.ends_at,      # Return datetime object
+            "location": appointment.location,
+            "notes": appointment.notes,
+            "created_at": appointment.created_at  # Return datetime object
+        })
+
+    return enhanced_appointments
 
 
 async def get_appointment(
@@ -143,19 +175,12 @@ async def get_appointment(
     appointment_id: int,
     user_id: int,
     role: str
-) -> Optional[AppointmentModel]:
+) -> Optional[AppointmentModel]: # Return type changed to AppointmentModel
     """
-    Get a specific appointment by ID with permission checks
-
-    Args:
-        db: Database session
-        appointment_id: ID of the appointment
-        user_id: ID of the current user
-        role: Role of the current user (patient, doctor, admin)
-
-    Returns:
-        The appointment if found and user has access, None otherwise
+    Get a specific appointment by ID with permission checks.
+    Returns the AppointmentModel instance if found and user has access.
     """
+    logger.info(f"Fetching appointment model {appointment_id} for user {user_id} with role {role}")
     result = await db.execute(
         select(AppointmentModel).where(AppointmentModel.id == appointment_id)
     )
@@ -164,12 +189,14 @@ async def get_appointment(
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
+    logger.info(f"Appointment model {appointment_id} details: Patient ID {appointment.patient_id}, Doctor ID {appointment.doctor_id}")
     # Check permissions - user must be the patient, doctor, or admin
     if (appointment.patient_id != user_id and
         appointment.doctor_id != user_id and
         role != "admin"):
         raise HTTPException(status_code=403, detail="Not authorized to access this appointment")
 
+    # Return the raw model instance. Formatting is moved to the route handler.
     return appointment
 
 
@@ -244,6 +271,7 @@ async def delete_appointment(
     Returns:
         True if the appointment was deleted, False otherwise
     """
+    logger.info(f"Attempting to delete appointment {appointment_id} by user {user_id} with role {role} in CRUD function") # Added log
     # Get the appointment (this will check permissions)
     appointment = await get_appointment(db, appointment_id, user_id, role)
 

@@ -6,93 +6,107 @@ import {
 } from "@/components/ui/sidebar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import settings from "@/config/settings";
+import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache"; // Added for server action
 
-const appointmentData = [
-	{
-		id: 1,
-		doctor_profile: { firstname: "John" },
-		start_time: "10:00 AM",
-		end_time: "11:00 AM",
-		location: "Room 101",
-		notes: "Follow-up on blood test results",
-	},
-	{
-		id: 2,
-		doctor_profile: { firstname: "Jane" },
-		start_time: "11:30 AM",
-		end_time: "12:30 PM",
-		location: "Room 102",
-		notes: "Discuss medication side effects",
-	},
-	{
-		id: 3,
-		doctor_profile: { firstname: "Alice" },
-		start_time: "1:00 PM",
-		end_time: "2:00 PM",
-		location: "Room 103",
-		notes: "Annual check-up",
-	},
-	{
-		id: 4,
-		doctor_profile: { firstname: "Bob" },
-		start_time: "2:30 PM",
-		end_time: "3:30 PM",
-		location: "Room 104",
-		notes: "Review treatment plan",
-	},
-	{
-		id: 5,
-		doctor_profile: { firstname: "Charlie" },
-		start_time: "4:00 PM",
-		end_time: "5:00 PM",
-		location: "Room 105",
-		notes: "Discuss test results",
-	},
-	{
-		id: 6,
-		doctor_profile: { firstname: "David" },
-		start_time: "5:30 PM",
-		end_time: "6:30 PM",
-		location: "Room 106",
-		notes: "Follow-up on treatment",
-	},
-	{
-		id: 7,
-		doctor_profile: { firstname: "Eve" },
-		start_time: "7:00 PM",
-		end_time: "8:00 PM",
-		location: "Room 107",
-		notes: "Discuss lifestyle changes",
-	},
-	{
-		id: 8,
-		doctor_profile: { firstname: "Frank" },
-		start_time: "8:30 PM",
-		end_time: "9:30 PM",
-		location: "Room 108",
-		notes: "Review lab results",
-	},
-];
+async function fetchAppointments() {
+	const cookieStore = await cookies();
+	const token = cookieStore.get("session")?.value;
+
+	if (!token) {
+		throw new Error("Authorization token is missing");
+	}
+
+	const response = await fetch(
+		`${settings.apiInternalUrl}/appointments`,
+		{
+			headers: {
+				Authorization: `Bearer ${token}`,
+			},
+		}
+	);
+
+	if (!response.ok) {
+		throw new Error("Failed to fetch appointments");
+	}
+
+	return response.json();
+}
+
+// Server Action to cancel an appointment
+async function cancelAppointment(formData) {
+  'use server';
+  const appointmentId = formData.get('appointmentId');
+
+  if (!appointmentId) {
+    console.error("Appointment ID is missing for cancellation.");
+    // Consider returning a response or throwing an error for client-side handling
+    return;
+  }
+
+  const cookieStore = await cookies();
+  const token = cookieStore.get("session")?.value;
+
+  if (!token) {
+    console.error("Authorization token is missing for cancel action.");
+    // Consider returning a response or throwing an error
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      // Ensure settings.apiInternalUrl is accessible here or pass it if needed
+      // For this example, assuming 'settings' is available in this scope as in fetchAppointments
+      `${settings.apiInternalUrl}/appointments/${appointmentId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Failed to cancel appointment ${appointmentId}: ${response.status} ${errorText}`);
+      // Consider returning a response or throwing an error
+      return;
+    }
+
+    // Revalidate the path to refresh the appointments list.
+    // Adjust '/c' if your appointments are displayed on a different base path.
+    // Using 'layout' can help if the data is used in a layout.
+    revalidatePath('/c', 'layout');
+  } catch (error) {
+    console.error(`Error cancelling appointment ${appointmentId}:`, error);
+    // Consider returning a response or throwing an error
+  }
+}
 
 function SideBarItem({ appointment }) {
 	return (
 		<Alert>
-			<AlertTitle>{appointment.doctor_profile?.firstname}</AlertTitle>
+			<AlertTitle>{appointment.patient_id} Dr. {appointment.doctor_profile?.first_name} {appointment.doctor_profile?.last_name}</AlertTitle>
 			<AlertDescription>
 				<p>
-					{appointment.start_time} - {appointment.end_time} -{" "}
+					{appointment.starts_at} - {appointment.ends_at} -{" "}
 					{appointment.location} - {appointment.notes}
 				</p>
-				<Button variant={"destructive"}>
-					Cancel
-				</Button>
+				<form action={cancelAppointment}>
+					<input type="hidden" name="appointmentId" value={appointment.id} />
+					<Button type="submit" variant={"destructive"}>Cancel</Button>
+				</form>
 			</AlertDescription>
 		</Alert>
 	);
 }
 
-export function ChatSideBar() {
-	console.log("hello");
+export default async function ChatSideBar() {
+	const appointments = await fetchAppointments();
+
+	console.log(appointments);
+
 	return (
 		<Sidebar>
 			<SidebarHeader>
@@ -102,7 +116,7 @@ export function ChatSideBar() {
 			</SidebarHeader>
 			<SidebarContent className={"px-2"}>
 				<SidebarGroup className={"space-y-2 bg-slate-"}>
-					{appointmentData.map((appointment) => (
+					{appointments.map((appointment) => (
 						<SideBarItem
 							key={appointment.id}
 							appointment={appointment}

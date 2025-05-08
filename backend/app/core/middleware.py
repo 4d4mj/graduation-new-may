@@ -26,7 +26,7 @@ async def verify_token_middleware(request: Request, call_next):
     This doesn't block unauthenticated requests, but just adds user info if authenticated.
     """
     # Skip authentication for public paths
-    if any(request.url.path.startswith(path) for path in PUBLIC_PATHS):
+    if any(request.url.path.startswith(public_path) for public_path in PUBLIC_PATHS):
         return await call_next(request)
 
     session_cookie = request.cookies.get("session")
@@ -42,6 +42,20 @@ async def verify_token_middleware(request: Request, call_next):
         except Exception:
             # Just continue without user info if token is invalid
             pass
+    # Check for Authorization header if session cookie is not present
+    if not session_cookie:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            try:
+                token_data = decode_access_token(token)
+                request.state.user = {
+                    "user_id": token_data.get("sub"),
+                    "role": token_data.get("role")
+                }
+            except Exception:
+                # Continue without user info if token is invalid
+                pass
 
     response = await call_next(request)
     return response

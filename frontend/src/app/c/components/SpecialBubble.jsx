@@ -27,7 +27,7 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 		return (
 			<Card className="max-w-xl">
 				<CardHeader>
-					<CardTitle>Processing...</CardTitle>
+					<CardTitle>Sent ✅</CardTitle>
 					<CardDescription>
 						Your response is being processed. Please wait.
 					</CardDescription>
@@ -127,7 +127,7 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 					)}
 					<CardTitle>Please Select an Appointment Slot</CardTitle>
 					<CardDescription>
-						{payload.doctor}
+						{payload.doctor} - {payload.specialty}
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -177,6 +177,7 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 						<Button
 							key={doctor.id}
 							onClick={() => {
+								setIsDisabled(true);
 								// Use doctor ID instead of name in subsequent operations
 								flushSync(() =>
 									setInput(
@@ -209,6 +210,24 @@ export default function SpecialBubble({ message, setInput, addMessage }) {
 					<CardDescription>
 						Your appointment with {payload.doctor_name} is confirmed for {payload.start_dt}.
 					</CardDescription>
+				</CardHeader>
+			</Card>
+		);
+	}
+
+	// New handler for "no_doctors" type
+	if (payload?.type === "no_doctors") {
+		return (
+			<Card className="max-w-xl">
+				<CardHeader>
+					<Badge
+						variant="secondary"
+						className="bg-gray-600 text-primary-foreground"
+					>
+						Scheduler
+					</Badge>
+					<CardTitle>No Doctors Found</CardTitle>
+					<CardDescription>{payload.message}</CardDescription>
 				</CardHeader>
 			</Card>
 		);

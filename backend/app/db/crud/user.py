@@ -3,10 +3,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 from typing import List, Optional, Dict, Any
+import logging
 
 from app.db.models.user import UserModel
 from app.db.models.patient import PatientModel
 from app.db.models.doctor import DoctorModel
+
+logger = logging.getLogger(__name__)
 
 
 async def get_users(
@@ -56,8 +59,19 @@ async def get_user(db: AsyncSession, user_id: int) -> Optional[UserModel]:
         selectinload(UserModel.doctor_profile)
     ).where(UserModel.id == user_id)
 
+    logger.info(f"Fetching user with ID {user_id}")
+
     result = await db.execute(query)
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+
+    if user and user.doctor_profile:
+        logger.info(f"Doctor profile found for user ID {user_id}: {user.doctor_profile}")
+    elif user:
+        logger.warning(f"No doctor profile found for user ID {user_id}")
+    else:
+        logger.warning(f"User with ID {user_id} not found")
+
+    return user
 
 
 async def get_user_by_email(db: AsyncSession, email: str) -> Optional[UserModel]:

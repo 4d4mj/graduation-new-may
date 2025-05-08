@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from typing import List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 
 from app.core.middleware import get_db
 from app.db.models.appointment import AppointmentModel
@@ -18,6 +19,16 @@ from app.core.middleware import get_current_user, require_roles
 # Create schemas for appointment
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
+class AppointmentDoctorProfile(BaseModel):
+    first_name: str
+    last_name: str
+    specialty: str
+
+    class Config:
+        from_attributes = True
+
 class AppointmentBase(BaseModel):
     doctor_id: int
     starts_at: datetime
@@ -30,6 +41,7 @@ class AppointmentCreate(AppointmentBase):
 
 class AppointmentUpdate(BaseModel):
     doctor_id: Optional[int] = None
+    doctor_profile: Optional[AppointmentDoctorProfile] = None
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
     location: Optional[str] = None
@@ -39,6 +51,7 @@ class Appointment(AppointmentBase):
     id: int
     patient_id: int
     created_at: datetime
+    doctor_profile: Optional[AppointmentDoctorProfile] = None
 
     class Config:
         from_attributes = True
@@ -55,7 +68,7 @@ async def create_appointment_route(
     # Use the CRUD function
     result = await create_appointment(
         db=db,
-        patient_id=current_user["user_id"],
+        patient_id=int(current_user["user_id"]), # Cast to int
         doctor_id=appointment.doctor_id,
         starts_at=appointment.starts_at,
         ends_at=appointment.ends_at,
@@ -84,7 +97,7 @@ async def get_appointments_route(
     """Get appointments based on filters"""
     return await get_appointments(
         db=db,
-        user_id=current_user["user_id"],
+        user_id=int(current_user["user_id"]), # Cast to int
         role=current_user["role"],
         skip=skip,
         limit=limit,
@@ -103,7 +116,7 @@ async def get_appointment_route(
     return await get_appointment(
         db=db,
         appointment_id=appointment_id,
-        user_id=current_user["user_id"],
+        user_id=int(current_user["user_id"]), # Cast to int
         role=current_user["role"]
     )
 
@@ -119,7 +132,7 @@ async def update_appointment_route(
     return await update_appointment(
         db=db,
         appointment_id=appointment_id,
-        user_id=current_user["user_id"],
+        user_id=int(current_user["user_id"]), # Cast to int
         role=current_user["role"],
         update_data=update_data
     )
@@ -131,10 +144,11 @@ async def delete_appointment_route(
     current_user: dict = Depends(get_current_user)
 ):
     """Delete an appointment"""
+    logger.info(f"Attempting to delete appointment {appointment_id} by user: {current_user}")
     await delete_appointment(
         db=db,
         appointment_id=appointment_id,
-        user_id=current_user["user_id"],
+        user_id=int(current_user["user_id"]), # Cast to int
         role=current_user["role"]
     )
     return None

@@ -36,7 +36,8 @@ async def create_user(db: AsyncSession, data: RegisterRequest) -> User:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Email already registered")
 
-    await db.refresh(user)       # refresh brings patient/doctor relationship too
+    # Eagerly load the relationships before validation
+    await db.refresh(user, attribute_names=['patient_profile', 'doctor_profile'])
     return User.model_validate(user, from_attributes=True)
 
 

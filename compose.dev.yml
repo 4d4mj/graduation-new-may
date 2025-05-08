@@ -2,15 +2,22 @@ services:
   backend:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:2326@db:5432/postgres
-      # OLLAMA_BASE_URL: "http://ollama:11434"
-      # OLLAMA_CHAT_MODEL: "llama3"
-      # OLLAMA_EMBED_MODEL: "nomic-embed-text:v1"
+      secret_key: ${SESSION_SECRET}
+      access_token_expire_minutes: 60
+      AGENT_WEB_SEARCH_CONTEXT_LIMIT: 20
+      AGENT_MAX_CONVERSATION_HISTORY: 40
+      LANGSMITH_TRACING: true
+      LANGSMITH_ENDPOINT: https://api.smith.langchain.com
+      LANGSMITH_PROJECT: graduation-medical
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
     build:
       context: ./backend
       target: development
     volumes:
       - ./backend:/app
-    env_file: ./backend/.env.development
     depends_on: [db]
     ports: ["8000:8000"]   # uvicorn --reload inside Dockerfile or entrypoint
 
@@ -22,10 +29,9 @@ services:
       - node_modules:/app/node_modules
     environment:
       NODE_ENV: development
-      # Use host.docker.internal so the browser inside the container can reach the host's published port
       NEXT_PUBLIC_API_URL: http://localhost:8000
-      # server-side only (no NEXT_PUBLIC_)
       API_INTERNAL_URL: http://backend:8000
+      SESSION_SECRET: ${SESSION_SECRET}
       WATCHPACK_POLLING: "true"
     command: sh -c "npm ci && npm run dev"
     ports: ["3000:3000"]

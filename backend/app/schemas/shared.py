@@ -24,6 +24,9 @@ class PatientOut(BaseModel):
 class DoctorOut(BaseModel):
     first_name: str
     last_name: str
+    dob: date
+    sex: Sex
+    phone: str
     specialty: str
 
 class UserOut(BaseModel):

@@ -71,3 +71,4 @@ instance/
 # Other
 *.env
 .env.*
+!.env.example
