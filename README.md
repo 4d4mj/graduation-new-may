@@ -31,38 +31,17 @@ cd Graduation-new
 The application uses environment variables for configuration. Docker Compose will automatically load variables from a `.env` file located in the project root (`d:\\Projects\\Graduation-new\\.env`).
 
 *   **Create a `.env` file in the project root directory.**
-    Copy the contents of `.env.example` (if one exists) or create it from scratch.
+    Copy the contents of `.env.example` or create it from scratch.
     Example `.env` file content:
     ```env
-    # PostgreSQL Settings (Docker Compose will use these for the db service if not overridden)
-    POSTGRES_USER=postgres
-    POSTGRES_PASSWORD=2326 # Consider changing this for production
-    POSTGRES_DB=postgres
 
     # Backend Application Settings
-    DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     GOOGLE_API_KEY=your_google_api_key_here
     COHERE_API_KEY=your_cohere_api_key_here
     # Add other necessary environment variables for the backend
 
-    # Frontend Application Settings (if any, typically prefixed with NEXT_PUBLIC_)
-    # NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
     ```
 *   The `compose.base.yml` file sets default PostgreSQL credentials. If you define `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` in your `.env` file, Docker Compose will use these values when creating the database service.
-*   The backend service (and potentially frontend) in your `compose.dev.yml` or `compose.prod.yml` should be configured to use these environment variables. Often, no explicit `environment:` block is needed in the compose file for variables defined in the `.env` file, as Docker Compose injects them automatically. However, you might still have an `env_file:` directive pointing to the `.env` file for clarity or specific override needs.
-
-    ```yaml
-    # Example snippet for backend service in compose.dev.yml
-    services:
-      backend:
-        # ... other configurations ...
-        # env_file:
-        #   - .env # Docker Compose usually picks this up automatically from the root
-        # environment: # Only if you need to override or set vars not in .env
-        #   - SOME_OTHER_VARIABLE=some_value
-        # ...
-    ```
-    **Important**: Ensure your `.env` file is added to your `.gitignore` file to prevent committing secrets to your repository.
 
 ### 3. Running the Application
 
@@ -148,5 +127,3 @@ The project includes scripts to seed the database with initial data, located in 
 ## Further Configuration
 
 *   **API Keys**: Ensure `GOOGLE_API_KEY` and `COHERE_API_KEY` (and any other external service keys) are properly set as environment variables for the backend service.
-
-This README provides a general guide. You may need to adjust commands and configurations based on the exact content of your `Makefile` and Docker Compose files.
