@@ -30,6 +30,7 @@ wheels/
 # Logs and databases
 *.log
 *.sql
+!docker/db/initdb.d/01-enable-extensions.sql
 *.sqlite3
 
 # OS generated files

@@ -23,3 +23,4 @@ psycopg[binary]
 langsmith
 dateparser
 Babel
+pypdf

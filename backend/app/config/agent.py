@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, FieldValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,11 +21,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # --------------------------------------------------------------------------- #
 class RAGSettings(BaseSettings):
     # vector store
-    vector_db_type: Literal["qdrant"] = "qdrant"
-    embedding_dim: int = 1536
+    vector_db_type: Literal["pgvector"] = "pgvector"
+    embedding_dim: int = 768
 
     # retrieval
-    min_retrieval_confidence: float = 0.75
     context_limit: int = 20
     insufficient_info_keywords: list[str] = [
         "don't have enough information",
@@ -38,8 +37,8 @@ class RAGSettings(BaseSettings):
     embedding_model_name: str = Field(
         "models/text-embedding-004", env="RAG_EMBEDDING_MODEL_NAME"
     )
-    chunk_size: int = Field(512, env="RAG_CHUNK_SIZE")
-    chunk_overlap: int = Field(50, env="RAG_CHUNK_OVERLAP")
+    chunk_size: int = Field(1500, env="RAG_CHUNK_SIZE")
+    chunk_overlap: int = Field(200, env="RAG_CHUNK_OVERLAP")
     vector_collection_name: str = Field(
         "medical_documents", env="RAG_VECTOR_COLLECTION_NAME"
     )
@@ -49,13 +48,13 @@ class RAGSettings(BaseSettings):
     reranker_top_k: int = Field(3, env="RAG_RERANKER_TOP_K")
 
     # local persistence
-    local_path: Path = Path("./data/qdrant_db")
     processed_docs_dir: Path = Path("./data/processed")
 
-    @field_validator("local_path", "processed_docs_dir")
+    @field_validator("chunk_overlap")
     @classmethod
-    def _ensure_dirs(cls, v: Path) -> Path:
-        v.mkdir(parents=True, exist_ok=True)
+    def check_overlap(cls, v: int, info: FieldValidationInfo) -> int:
+        if "chunk_size" in info.data and v >= info.data["chunk_size"]:
+            raise ValueError("chunk_overlap must be less than chunk_size")
         return v
 
 
@@ -69,13 +68,17 @@ class AgentSettings(BaseSettings):
     # orchestrator knobs
     web_search_context_limit: int = 20
     max_conversation_history: int = 40
-    CONFIDENCE_THRESHOLD: float = 0.85
+    # CONFIDENCE_THRESHOLD: float = 0.85
+
+    rag_fallback_confidence_threshold: float = Field(
+        default=0.75, env="AGENT_RAG_FALLBACK_CONFIDENCE"
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
         env_file=f".env.{os.getenv('APP_ENV', 'development')}",
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
     )
 
 
