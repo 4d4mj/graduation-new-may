@@ -15,7 +15,8 @@ class ChatMessage(BaseModel):
     A generic chat message exchanged between the user and the assistant.
     Extend this later with `image_url`, `attachments`, etc.
     """
-    role: Literal["user", "assistant"]          # or "system" if you need it
+
+    role: Literal["user", "assistant"]  # or "system" if you need it
     content: str
     ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -34,9 +35,14 @@ class ChatRequest(BaseModel):
     * `interrupt_id` - ID of the interrupt to resume, if applicable
     * `resume_value` - Value to resume with (e.g., "yes" or "no" for confirmations)
     """
+
     message: str = Field(..., min_length=1, description="Current user utterance")
-    user_tz: Optional[str] = Field(None, description="User IANA timezone, e.g. 'Asia/Beirut'")
-    interrupt_id: Optional[str] = Field(None, description="ID of the interrupt to resume")
+    user_tz: Optional[str] = Field(
+        None, description="User IANA timezone, e.g. 'Asia/Beirut'"
+    )
+    interrupt_id: Optional[str] = Field(
+        None, description="ID of the interrupt to resume"
+    )
     resume_value: Optional[Any] = Field(None, description="Value to resume with")
 
 
@@ -56,6 +62,7 @@ class ChatResponse(BaseModel):
     * `session_id`   - Alias for session to maintain backward compatibility
     * `messages`     - List of messages in the conversation history (optional)
     """
+
     reply: Any  # Can be string or structured data for special bubbles
     agent: str
     session: str

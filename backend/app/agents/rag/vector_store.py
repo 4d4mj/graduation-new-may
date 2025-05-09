@@ -55,52 +55,69 @@ async def initialize_vector_store(engine: AsyncEngine):
     collection_name = agent_settings.rag.vector_collection_name
     cache_key = f"pgvector_{collection_name}"
 
-    if cache_key not in _vector_store_cache:
-        logger.info(f"Initializing PGVector store for collection: {collection_name}")
-        embedding_function = get_embedding_model()  # Ensure embeddings are ready
-        if not embedding_function:
-            logger.error("Cannot initialize PGVector: Embedding model not available.")
-            # Raise error or handle appropriately during startup
-            raise RuntimeError(
-                "PGVector initialization failed: Embedding model unavailable."
-            )
+    if (
+        cache_key in _vector_store_cache
+    ):  # If already initialized (e.g. by another call)
+        logger.info(
+            f"PGVector store for '{collection_name}' already initialized and cached."
+        )
+        return _vector_store_cache[cache_key]  # Return existing instance
 
-        if not app_settings.database_url:
-            logger.error("Cannot initialize PGVector: DATABASE_URL not set.")
-            raise RuntimeError("PGVector initialization failed: DATABASE_URL missing.")
+    logger.info(
+        f"Attempting to initialize PGVector store for collection: {collection_name}"
+    )
+    embedding_function = get_embedding_model()
+    if not embedding_function:
+        logger.error("Cannot initialize PGVector: Embedding model not available.")
+        raise RuntimeError("PGVector init failed: Embedding model unavailable.")
+    if not app_settings.database_url:
+        logger.error("Cannot initialize PGVector: DATABASE_URL not set.")
+        raise RuntimeError("PGVector init failed: DATABASE_URL missing.")
 
         # connection_string = str(app_settings.database_url)
 
+    try:
+        # --- Corrected Call for Class Method ---
+        # Pass 'embedding' positionally, others by keyword
+        store = PGVector(
+            connection=engine,
+            embeddings=embedding_function,
+            collection_name=collection_name,
+            distance_strategy=DistanceStrategy.COSINE,
+            use_jsonb=True,
+        )
+
+        # --- TRY A SIMPLE OPERATION TO CONFIRM IT'S WORKING ---
+        # This is a bit of a hack, but can confirm table access.
+        # Ideally, langchain-postgres would have a more direct "ensure_initialized_and_connected"
         try:
-            # --- Corrected Call for Class Method ---
-            # Pass 'embedding' positionally, others by keyword
-            store = PGVector(
-                connection=engine,
-                embeddings=embedding_function,
-                collection_name=collection_name,
-                distance_strategy=DistanceStrategy.COSINE,
-                use_jsonb=True,
-            )
-
-            _vector_store_cache[cache_key] = store
+            # Try a dummy search or add; this might create tables if they don't exist
+            # and will fail if connection or extension is bad.
+            await store.asimilarity_search("test query for init", k=1)
             logger.info(
-                f"PGVector store for collection '{collection_name}' initialized and cached."
+                "PGVector store: Dummy search successful during initialization."
             )
-
-        except ImportError as ie:
-            logger.error(
-                f"ImportError initializing PGVector. Ensure 'psycopg2-binary' or 'psycopg' is installed: {ie}",
-                exc_info=True,
-            )
-            raise RuntimeError(
-                "PGVector initialization failed due to missing driver."
-            ) from ie
         except Exception as e:
             logger.error(
-                f"Failed to initialize PGVector store '{collection_name}': {e}",
+                f"PGVector store: Dummy search FAILED during initialization: {e}",
                 exc_info=True,
             )
-            raise RuntimeError(f"PGVector initialization failed: {e}") from e
+            raise RuntimeError(f"PGVector store failed post-connection check: {e}")
+        # --- END SIMPLE OPERATION ---
+
+        _vector_store_cache[cache_key] = store
+        logger.info(
+            f"PGVector store for collection '{collection_name}' initialized, tested and cached."
+        )
+
+        return store
+
+    except Exception as e:
+        logger.error(
+            f"Failed to initialize PGVector store '{collection_name}': {e}",
+            exc_info=True,
+        )
+        raise RuntimeError(f"PGVector initialization failed: {e}")
 
 
 def get_vector_store() -> Optional[PGVector]:
@@ -113,10 +130,10 @@ def get_vector_store() -> Optional[PGVector]:
     store = _vector_store_cache.get(cache_key)
     if not store:
         logger.warning(
-            f"PGVector store '{collection_name}' accessed before initialization or initialization failed."
+            f"get_vector_store: PGVector store '{collection_name}' cache miss. Store not initialized or init failed."
         )
-        # Optionally, attempt lazy initialization here, but better to do it at startup
-        # raise RuntimeError("PGVector store not initialized.")
+    # Optionally, attempt lazy initialization here, but better to do it at startup
+    # raise RuntimeError("PGVector store not initialized.")
     return store
 
 
