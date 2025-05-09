@@ -8,15 +8,22 @@ from typing import List, Dict, Any, Optional, Iterable
 # Ensure app path is discoverable
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+import re
+
+# sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.sql import text
+
+APP_DIR = Path(__file__).resolve().parent.parent  # Get the /app directory path
+sys.path.insert(0, str(APP_DIR))
 
 # --- Core Components ---
 from app.config.settings import settings as app_settings
 from app.db.base import get_engine as create_async_engine_from_url
+from app.config.agent import settings as agent_settings
 
 # Import PGVector specifically for patching
 from langchain_postgres.vectorstores import PGVector
@@ -27,6 +34,8 @@ from app.tools.rag.vector_store import (
 )
 from app.tools.rag.document_processor import MedicalDocumentProcessor
 from app.core.models import get_embedding_model
+
+from typing import Optional
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -68,7 +77,6 @@ def load_documents(file_path: Path) -> List[Document]:
             loader = PyPDFLoader(str(file_path), extract_images=False)
         elif ext == ".txt":
             loader = TextLoader(str(file_path), encoding="utf-8")
-        # TODO: Add other loaders if needed
 
         if loader:
             logger.info(f"Loading document: {file_path.name}")
@@ -94,24 +102,35 @@ def load_documents(file_path: Path) -> List[Document]:
 
 
 # --- Main Asynchronous Ingestion Logic ---
-async def run_ingestion(args):
+async def run_ingestion(args, existing_engine: Optional[AsyncEngine] = None):
     """Main asynchronous function to initialize, find files, process, and ingest."""
     logger.info("Starting ingestion process...")
-    engine = None
+    engine = existing_engine
+    engine_created_here = False
 
     try:
         # 1. Create DB Engine
-        logger.info("Creating DB engine for ingestion...")
-        if not app_settings.database_url:
-            logger.critical("DATABASE_URL not found in settings. Exiting.")
+        if not engine:
+            logger.info("Creating DB engine for ingestion...")
+            if not app_settings.database_url:
+                logger.critical("DATABASE_URL not found in settings. Exiting.")
+                return
+            engine = await create_async_engine_from_url(str(app_settings.database_url))
+            engine_created_here = True
+            logger.info("DB engine created.")
+        else:
+            logger.info("Using preexisting engine from ingestion")
+
+        if not engine:
+            logger.critical("DB Engine is not available. Exiting.")
             return
-        engine = await create_async_engine_from_url(str(app_settings.database_url))
-        logger.info("DB engine created.")
 
         # 2. Ensure Embedding Model is Ready
         logger.info("Ensuring embedding model is ready...")
         if not get_embedding_model():
             logger.critical("Failed to initialize embedding model. Exiting.")
+            if engine_created_here:
+                await engine.dispose()
             return
         logger.info("Embedding model ready.")
 
@@ -123,6 +142,8 @@ async def run_ingestion(args):
             logger.critical(
                 "Vector store instance not available after initialization attempt. Exiting."
             )
+            if engine_created_here:  # Dispose if created here
+                await engine.dispose()
             return
         logger.info("Vector store connection ready.")
 
@@ -134,40 +155,31 @@ async def run_ingestion(args):
         base_data_dir = Path("/app/data")
         files_to_process: List[Path] = []
         target_desc = ""
-        # ... (file finding logic remains the same) ...
-        if args.file:
-            target_path = base_data_dir / args.file
-            target_desc = f"file '{args.file}'"
-            if target_path.is_file():
-                files_to_process.append(target_path)
-            else:
-                logger.error(
-                    f"Specified file not found inside container: {target_path}"
-                )
-                return
-        elif args.dir:
-            target_path = base_data_dir / args.dir
-            target_desc = f"directory '{args.dir}'"
-            if target_path.is_dir():
-                supported_extensions = ["*.pdf", "*.txt"]
-                logger.info(
-                    f"Scanning directory {target_path} for {supported_extensions}..."
-                )
-                for ext in supported_extensions:
-                    found = list(target_path.rglob(ext))
-                    logger.info(f"Found {len(found)} files with extension {ext}")
-                    files_to_process.extend(found)
-            else:
-                logger.error(
-                    f"Specified directory not found inside container: {target_path}"
-                )
-                return
+
+        target_path = base_data_dir / args.dir
+        target_desc = f"directory '{args.dir}'"
+
+        if target_path.is_dir():
+            supported_extensions = ["*.pdf", "*.txt"]
+            logger.info(
+                f"Scanning directory {target_path} for {supported_extensions}..."
+            )
+            for ext in supported_extensions:
+                found = list(target_path.rglob(ext))
+                logger.info(f"Found {len(found)} files with extension {ext}")
+                files_to_process.extend(found)
         else:
-            logger.error("Internal error: No file or directory specified.")
+            logger.error(
+                f"Specified directory not found inside container: {target_path}"
+            )
+            if engine_created_here:
+                await engine.dispose()  # Cleanup
             return
 
         if not files_to_process:
             logger.warning(f"No processable files found in {target_desc}.")
+            if engine_created_here:
+                await engine.dispose()  # Cleanup
             return
         logger.info(f"Found {len(files_to_process)} files to process in {target_desc}.")
 
@@ -179,6 +191,35 @@ async def run_ingestion(args):
         for file_path in files_to_process:
             logger.info(f"--- Processing file: {file_path.name} ---")
             try:
+                # --- METADATA EXTRACTION
+                base_metdata = {}
+                filename_lower = file_path.stem.lower()
+
+                # determine document type based on keywords
+                if "drug" in filename_lower or "bnf" in filename_lower:
+                    base_metdata["document_type"] = "drug_reference"
+                elif "guideline" in filename_lower or "nice" in filename_lower:
+                    base_metdata["document_type"] = "clinical_guideline"
+                elif "anatomy" in filename_lower:
+                    base_metdata["document_type"] = "anatomy_textbook"
+                elif "physiology" in filename_lower:
+                    base_metdata["document_type"] = "physiology_textbook"
+                elif "medicine" in filename_lower:
+                    base_metdata["document_type"] = "internal_medicine_textbook"
+                elif "terminology" in filename_lower:
+                    base_metdata["document_type"] = "medical_terminology"
+                else:
+                    base_metdata["document_type"] = "medical_text"
+
+                cleaned_title = file_path.stem.replace("_", " ")
+                cleaned_title = re.sub(r"\s+", " ", cleaned_title).strip()
+                base_metdata["title"] = cleaned_title
+
+                base_metdata["source_file"] = file_path.name
+
+                logger.info(f"extracted metadata for {file_path.name}: {base_metdata}")
+                # ---END METADATA EXTRACTION
+
                 loaded_docs = load_documents(file_path)
                 if not loaded_docs:
                     logger.warning(
@@ -189,25 +230,40 @@ async def run_ingestion(args):
 
                 all_chunks_for_file: List[Document] = []
                 for doc_part in loaded_docs:
+                    combined_metadata = {**base_metdata, **doc_part.metadata}
+
                     chunks = processor.process_document(
-                        content=doc_part.page_content, metadata=doc_part.metadata
+                        content=doc_part.page_content, metadata=combined_metadata
                     )
+
                     if chunks:
+                        if (
+                            all_chunks_for_file == []
+                        ):  # Log only for the first chunk of the file
+                            logger.debug(
+                                f"First chunk metadata sample: {chunks[0].metadata}"
+                            )
                         all_chunks_for_file.extend(chunks)
                     else:
                         logger.warning(
-                            f"No chunks generated for a part of {file_path.name}"
+                            f"No chunks generated for a part of {file_path.name} metadata: {combined_metadata.get('page_number', 'N/A')}"
                         )
-
+                # Add chunks to vector store
                 if all_chunks_for_file:
                     logger.info(
                         f"Adding {len(all_chunks_for_file)} chunks from {file_path.name} to vector store..."
                     )
-                    await add_documents_to_vector_store(
-                        all_chunks_for_file, store_instance=vector_store_instance
-                    )
-                    total_chunks_added += len(all_chunks_for_file)
-                    successful_files += 1
+                    if vector_store_instance:
+                        await add_documents_to_vector_store(
+                            all_chunks_for_file, store_instance=vector_store_instance
+                        )
+                        total_chunks_added += len(all_chunks_for_file)
+                        successful_files += 1
+                    else:
+                        logger.error(
+                            f"Skipping addtition for {file_path.name} as vector store instance is invalid"
+                        )
+                        failed_files += 1
                 else:
                     logger.warning(
                         f"No processable chunks generated for {file_path.name}. Not adding to store."
@@ -243,11 +299,76 @@ async def run_ingestion(args):
         )
     finally:
         # 8. Cleanup
-        if engine:
-            logger.info("Disposing of database engine...")
+        if engine_created_here and engine:
+            logger.info("Disposing of database engine created by run_ingestion...")
             await engine.dispose()
             logger.info("Database engine disposed.")
-        logger.info("Ingestion script finished.")
+        elif existing_engine:
+            logger.info(
+                "Skipping engine disposal in run_ingestion as it was passed in."
+            )
+
+    async def clear_collection_if_needed(engine: AsyncEngine, collection_name: str):
+        if not parsed_args.clear:
+            return
+        logger.warning(f"Clearing collection '{collection_name}' as requested...")
+        async with engine.connect() as connection:
+            async with connection.begin():
+                try:
+                    await connection.execute(
+                        text(
+                            f"DELETE FROM langchain_pg_embedding WHERE collection_id = (SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name)"
+                        ),
+                        {"coll_name": collection_name},
+                    )
+                    await connection.execute(
+                        text(
+                            "DELETE FROM langchain_pg_collection WHERE name = :coll_name"
+                        ),
+                        {"coll_name": collection_name},
+                    )
+                    logger.info(
+                        f"Successfully cleared data for collection '{collection_name}'."
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Error clearing collection '{collection_name}': {e}. Manual cleanup might be needed.",
+                        exc_info=True,
+                    )
+                    raise
+
+    async def run_ingestion_with_clear(args):
+        """Wrapper to handle engine creation, optional clearing, and final disposal."""
+        engine = None  # Initialize engine variable for the finally block
+        try:
+            # 1. Create engine *once*
+            logger.info("Creating DB engine (wrapper)...")
+            if not app_settings.database_url:
+                logger.critical("DATABASE_URL not found. Exiting.")
+                return
+            engine = await create_async_engine_from_url(str(app_settings.database_url))
+            logger.info("DB engine created (wrapper).")
+
+            # 2. Call clear logic (uses the created engine)
+            collection_name_to_clear = (
+                agent_settings.rag.vector_collection_name
+            )  # Get collection name
+            await clear_collection_if_needed(engine, collection_name_to_clear)
+
+            # 3. Call the main ingestion logic, passing the engine
+            await run_ingestion(args, engine)  # <--- Pass the engine here
+
+        except Exception as e:
+            # Catch errors from clearing or ingestion
+            logger.critical(
+                f"Critical error during wrapped ingestion: {e}", exc_info=True
+            )
+        finally:
+            # 4. Dispose the engine created by *this* wrapper function
+            if engine:
+                logger.info("Disposing DB engine (wrapper)...")
+                await engine.dispose()
+                logger.info("DB engine disposed (wrapper).")
 
 
 # --- Script Entry Point ---
@@ -257,30 +378,18 @@ if __name__ == "__main__":
         description="Ingest documents into RAG vector store. Paths are relative to the data directory mounted inside the container (/app/data)."
     )
     parser.add_argument(
-        "--file",
-        type=str,
-        help="Path to a single file relative to the data directory (e.g., 'my_doc.pdf').",
-    )
-    parser.add_argument(
         "--dir",
         type=str,
-        default=".",  # Default to processing the root of the data directory
-        help="Path to a directory relative to the data directory (e.g., '.' for all, or 'subdir_name'). Default: '.'",
+        default="medical_documents",
+        help="Path to the directory relative to /app/data containing documents to ingest. Default: 'medical_documents'",
     )
-    # Add other arguments like --clear later if needed
-    # parser.add_argument('--clear', action='store_true', help='Clear the existing collection before ingesting.')
+    parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="clear the existing collection before ingesting",
+    )
 
     parsed_args = parser.parse_args()
-    # ----------------------------------------------------
-
-    # Basic validation
-    if parsed_args.file and parsed_args.dir != ".":
-        parser.error(
-            "Cannot specify both --file and a specific --dir. Use --dir . or just --file."
-        )
-    # This check might be redundant if default is always '.', but safe
-    # if not parsed_args.file and not parsed_args.dir:
-    #     parser.error("Internal error: No file or directory target.")
 
     # Run the main async function
     asyncio.run(run_ingestion(parsed_args))

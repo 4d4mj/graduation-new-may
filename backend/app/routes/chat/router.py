@@ -1,3 +1,5 @@
+# backend/app/routes/chat/router.py
+
 import logging
 from fastapi import APIRouter, HTTPException, Cookie, Request, Depends
 from app.config.settings import env
@@ -7,9 +9,11 @@ from app.core.middleware import get_current_user
 from app.schemas.chat import ChatRequest, ChatResponse
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
+import json
+import random  # Keep for /test endpoint
 
 router = APIRouter(prefix="/chat", tags=["chat"])
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # Corrected logger name
 
 secure_cookie = env == "production"
 
@@ -45,58 +49,88 @@ async def chat(
     user_id = current_user["user_id"]
     role = current_user["role"]
 
-    # Get the graph from app.state
-    graph = request.app.state.graphs.get(role)
+    # 2. Graph Retrieval
+    if not hasattr(request.app.state, "graphs") or not request.app.state.graphs:
+        logger.critical(
+            "Chat request: app.state.graphs not found or is empty! Graphs not initialized properly in lifespan."
+        )
+        raise HTTPException(500, "Chat service not properly initialized.")
+
+    graph = request.app.state.graphs.get(role)  # Get graph based on role
     if not graph:
-        logger.error(f"Graph for role '{role}' not found!")
+        # Log available graphs if lookup fails
+        available_graphs = (
+            list(request.app.state.graphs.keys()) if request.app.state.graphs else []
+        )
+        logger.error(
+            f"Chat request: Graph for role '{role}' not found in app.state.graphs! Available graphs: {available_graphs}"
+        )
         raise HTTPException(500, f"Invalid role '{role}' or graph not initialized.")
-
-    # Define config for the graph invocation (needed for both paths)
-    config = {
-        "configurable": {
-            "thread_id": session
-        }
-    }
-
-    # --- Handle resume with interrupt_id if present ---
-    if payload.interrupt_id:
-        logger.info(f"Resuming from interrupt: {payload.interrupt_id}")
-        # Don't include interrupt_id in the Command - it will be matched internally
-        cmd = Command(resume=payload.resume_value)
-
-        try:
-            final_state = await graph.ainvoke(cmd, config=config)
-        except Exception as e:
-            logger.exception(f"Error resuming graph execution: {e}")
-            raise HTTPException(500, f"Error resuming: {e}")
     else:
-        # --- Prepare input for normal graph.ainvoke with checkpointer ---
-        graph_input = {
-            "messages": [HumanMessage(content=payload.message)],
-            "current_input": payload.message,  # Still useful for guard_in
-            "final_output": None,
-            "agent_name": None,
-            "user_id": user_id,
-            "user_tz": payload.user_tz,
-        }
+        logger.info(
+            f"Chat request: Successfully retrieved graph for role '{role}'."
+        )  # Log successful retrieval
 
-        try:
-            final_state = await graph.ainvoke(graph_input, config=config)
-        except GraphInterrupt as gi:
-            # Surface the interrupt payload to the UI - this contains raw tool data
-            logger.info(f"Graph interrupted: {gi.value}")
-            return ChatResponse(
-                reply=gi.value,
-                agent="Scheduler",
-                interrupt_id=gi.ns[0],  # Pass the interrupt ID to the client
-                session=session
+    # 3. Graph Invocation
+    config = {"configurable": {"thread_id": session}}
+    final_state = None
+    try:
+        # NOTE: Interrupt handling is kept, assuming it might be needed for complex flows later,
+        # but the doctor agent currently isn't expected to trigger it.
+        if payload.interrupt_id:
+            logger.info(
+                f"Resuming from interrupt: {payload.interrupt_id} for role {role}"
             )
-        except Exception as e:
-            logger.exception("Error running graph")
-            raise HTTPException(500, f"Processing error: {e}")
+            cmd = Command(resume=payload.resume_value)
+            final_state = await graph.ainvoke(cmd, config=config)
+        else:
+            # Normal invocation
+            graph_input = {
+                "messages": [HumanMessage(content=payload.message)],
+                "current_input": payload.message,
+                "final_output": None,
+                "agent_name": None,
+                "user_id": user_id,
+                "user_tz": payload.user_tz,
+            }
+            logger.debug(
+                f"Invoking graph for role '{role}' with input keys: {list(graph_input.keys())} and config: {config}"
+            )
+            final_state = await graph.ainvoke(graph_input, config=config)
+
+    except GraphInterrupt as gi:
+        # Handle interrupt - might be relevant for patient flow later
+        logger.warning(f"Graph interrupted unexpectedly for role '{role}': {gi.value}")
+        # Decide how to respond - maybe just return the interrupt value as string?
+        # Build history for context even on interrupt
+        interrupted_messages_state = gi.args[0] if gi.args else {}
+        interrupted_history = interrupted_messages_state.get("messages", [])
+        response_messages_interrupt = []
+        for msg in interrupted_history:
+            msg_role_i = "user" if isinstance(msg, HumanMessage) else "assistant"
+            content_i = str(getattr(msg, "content", ""))
+            if content_i:
+                response_messages_interrupt.append(
+                    ChatMessage(role=msg_role_i, content=content_i)
+                )
+
+        return ChatResponse(
+            reply=f"Action required: {str(gi.value)}",  # Provide context
+            agent="System",  # Indicate it's an interrupt state
+            interrupt_id=gi.ns[0],
+            messages=response_messages_interrupt,
+        )
+    except Exception as e:
+        logger.exception(f"Error running graph for role '{role}'")
+        raise HTTPException(500, f"Processing error: {e}")
 
     # --- Process the final state ---
-    # Extract the response from the final state
+    if final_state is None:
+        logger.error(
+            f"Graph execution finished for role '{role}' but final_state is None."
+        )
+        raise HTTPException(500, "Internal processing error: No final state.")
+
     all_messages: List[BaseMessage] = final_state.get("messages", [])
 
     # 2️⃣ Use the helper function instead of just looking at the last message
@@ -111,24 +145,52 @@ async def chat(
         reply = final_state.get("final_output")
         logger.info("Using final_output from guardrails as reply")
 
-    # Fallback reply
-    if reply is None:  # Use 'is None' to handle potential empty string replies
-        reply = "I apologize, but I couldn't process your request. Please try again later."
-        logger.error("Graph finished but no reply content found in final state.")
+    # Fallback Reply
+    if reply is None:
+        reply = "I apologize, but I encountered an issue processing your request. Please try again."
+        logger.error(
+            f"Graph finished for role '{role}' but no reply content found in final state."
+        )
+
+    # Ensure reply is always a string
+    if not isinstance(reply, str):
+        logger.warning(
+            f"Final reply content was not a string ({type(reply)}), coercing."
+        )
+        reply = str(reply)
 
     # Get agent name
     agent_name = final_state.get("agent_name")
     if agent_name is None:
-        agent_name = "Medical Assistant"  # Provide a default value to pass validation
-        logger.warning("No agent_name was set in final state, using default: %s", agent_name)
+        # Use a role-specific default
+        agent_name = "Doctor Assistant" if role == "doctor" else "Patient Assistant"
+        logger.warning(
+            f"No agent_name set in final state for role '{role}', using default: '{agent_name}'"
+        )
 
+    # Build response history
+    response_messages = []
+    for msg in all_messages:
+        msg_role = "user" if isinstance(msg, HumanMessage) else "assistant"
+        # Ensure content is string, skip if empty
+        content = str(getattr(msg, "content", ""))
+        if content:
+            response_messages.append(ChatMessage(role=msg_role, content=content))
+
+    logger.info(f"Final reply string for role '{role}': '{reply[:100]}...'")
+
+    # --- Return Response (matching ChatResponse schema) ---
     return ChatResponse(
         reply=reply,
         agent=agent_name,
+        messages=response_messages,
         session=session,
+        session_id=session,                    # Include history
+        interrupt_id=None # Explicitly null unless set by GraphInterrupt block
     )
 
-import random
+
+# Keep the /test endpoint for UI testing if needed
 @router.post("/test", response_model=ChatResponse, status_code=200)
 async def testChat(
     current_user: dict = Depends(get_current_user),
@@ -160,5 +222,5 @@ async def testChat(
     return ChatResponse(
         reply=reply,
         agent=agent_name,
-        session=session, # Return the session token received
+        messages=[ChatMessage(role="assistant", content=reply)],
     )
