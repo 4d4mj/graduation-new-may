@@ -72,3 +72,5 @@ instance/
 # Other
 *.env
 .env.*
+
+backend/data/medical_documents/*.pdf
