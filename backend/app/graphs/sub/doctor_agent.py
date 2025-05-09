@@ -63,7 +63,7 @@ Thought: The user explicitly asked for a web search. I will use run_web_search.
 Action: run_web_search(query='latest ACC guidelines hypertension')
 Observation: ["Snippet 1...", "Snippet 2..."]
 Thought: I have the web results. I will present them.
-Action: Final Answer: "Searching the web for the latest ACC guidelines on hypertension, I found the following points: [Summarize snippets] [Source: Web Search]"
+Action: Final Answer: "Searching the web for the latest ACC guidelines on hypertension, I found the following points: [Summarize snippets] [Source: (URLs from tool output)]"
 
 Example Interaction (Small Talk):
 User: Thanks, that was helpful!
