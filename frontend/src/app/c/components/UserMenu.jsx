@@ -15,8 +15,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 export function UserMenu({ user }) {
 	function getInitials(user) {
-		const firstNameInitial = user.patient_profile.first_name?.[0] || "";
-		const lastNameInitial = user.patient_profile.last_name?.[0] || "";
+		const firstNameInitial = user.patient_profile?.first_name?.[0] || "";
+		const lastNameInitial = user.patient_profile?.last_name?.[0] || "";
 		return `${firstNameInitial}${lastNameInitial}`.toUpperCase();
 	}
 
@@ -24,7 +24,7 @@ export function UserMenu({ user }) {
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
 				<Button variant="ghost">
-					{user.patient_profile.first_name}
+					{user.patient_profile?.first_name}
 					<Avatar>
 						<AvatarFallback>{getInitials(user)}</AvatarFallback>
 					</Avatar>

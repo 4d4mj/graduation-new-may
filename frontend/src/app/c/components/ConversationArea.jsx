@@ -13,7 +13,7 @@ export default function ConversationArea({ user, setInput, messages, addMessage 
 		return (
 			<div className="text-center flex-1 bg-gradient-to-r from-slate-800 via-slate-600 to-slate-700 text-transparent bg-clip-text content-center">
 				<h1 className="font-bold text-4xl mb-2">
-					Greetings, {user.patient_profile.first_name}
+					Greetings, {user.patient_profile?.first_name}
 				</h1>
 				<p className="text-2xl">
 					How can I assist you with your health needs today?

@@ -3,6 +3,7 @@ from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
 from app.graphs.states import DoctorState
+from app.config.agent import settings as agent_settings
 
 from app.tools.research.tools import run_rag, run_web_search
 from typing import Sequence
@@ -16,15 +17,15 @@ ASSISTANT_SYSTEM_PROMPT = f"""You are an AI assistant for healthcare professiona
 
 AVAILABLE TOOLS:
 1. run_rag: Use this FIRST for any medical or clinical question to search the internal knowledge base. It returns an 'answer', 'sources', and 'confidence' score (0.0 to 1.0).
-2. run_web_search: Use this ONLY if explicitly asked by the user OR if the 'confidence' score from 'run_rag' is BELOW {settings.rag_fallback_confidence_threshold}. It returns relevant web snippets.
+2. run_web_search: Use this ONLY if explicitly asked by the user OR if the 'confidence' score from 'run_rag' is BELOW {agent_settings.rag_fallback_confidence_threshold}. It returns relevant web snippets.
 
 WORKFLOW FOR QUESTIONS REQUIRING KNOWLEDGE:
 1.  **Receive User Query:** Analyze the doctor's question.
 2.  **Check for Explicit Web Search:** If the user explicitly asks for a web search (e.g., "search the web for...", "what's the latest on...", "find recent articles about..."), go directly to step 5.
 3.  **Use RAG First:** For all other medical/clinical questions, you MUST use the `run_rag` tool with the query.
 4.  **Check RAG Confidence:** Examine the 'confidence' score returned by `run_rag`.
-    *   **If confidence >= {settings.rag_fallback_confidence_threshold}:** The internal information is likely sufficient. Base your answer PRIMARILY on the 'answer' provided by `run_rag`. Cite the 'sources' provided by the tool. Proceed to step 6.
-    *   **If confidence < {settings.rag_fallback_confidence_threshold}:** The internal information might be insufficient or irrelevant. Proceed to step 5.
+    *   **If confidence >= {agent_settings.rag_fallback_confidence_threshold}:** The internal information is likely sufficient. Base your answer PRIMARILY on the 'answer' provided by `run_rag`. Cite the 'sources' provided by the tool. Proceed to step 6.
+    *   **If confidence < {agent_settings.rag_fallback_confidence_threshold}:** The internal information might be insufficient or irrelevant. Proceed to step 5.
 5.  **Use Web Search (Fallback or Explicit Request):** Use the `run_web_search` tool with the original or a refined query.
     *   If web search provides useful results, base your answer PRIMARILY on these results. You SHOULD mention that you consulted external web sources because internal information was limited or upon their request.
     *   If web search *also* returns no useful information, clearly state that you couldn't find relevant information in the internal knowledge base or on the web.
@@ -42,7 +43,7 @@ User: What are the new treatments for XYZ disease?
 Thought: The user is asking a clinical question. I need to use run_rag first.
 Action: run_rag(query='What are the new treatments for XYZ disease?')
 Observation: {{ "answer": "Older treatments include A and B.", "sources": [...], "confidence": 0.6 }}
-Thought: The confidence score (0.6) is below the threshold ({settings.rag_fallback_confidence_threshold}). I must now use run_web_search.
+Thought: The confidence score (0.6) is below the threshold ({agent_settings.rag_fallback_confidence_threshold}). I must now use run_web_search.
 Action: run_web_search(query='new treatments for XYZ disease')
 Observation: ["Snippet 1 about treatment C...", "Snippet 2 about trial D..."]
 Thought: Web search provided newer information. I should formulate the answer based on this and mention I checked external sources.

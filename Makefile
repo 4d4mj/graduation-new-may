@@ -36,8 +36,8 @@ lint:          ## lint code in both frontend & backend
 test:          ## run backend tests
 	$(COMPOSE_DEV) run --rm backend pytest
 
-migrate:		## run backend migrations
-	$(COMPOSE_DEV) run --rm backend alembic upgrade head
+# migrate:		## run backend migrations
+# 	$(COMPOSE_DEV) run --rm backend alembic upgrade head
 
 # ─── PRODUCTION ────────────────────────────────────────────────────────────────
 

@@ -11,6 +11,7 @@ from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
 import json
 import random  # Keep for /test endpoint
+from app.schemas.chat import ChatMessage
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)  # Corrected logger name
