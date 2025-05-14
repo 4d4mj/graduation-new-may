@@ -305,11 +305,20 @@ async def book_appointment(
 
             # If successful, appointment is an AppointmentModel instance
             logger.info(f"Booking successful: ID {appointment.id}")
+            doctor_email_address = "unknown" # Default
+            
+             # Ensure doctor and doctor.user and doctor.user.email are accessible
+            if doctor and doctor.user and hasattr(doctor.user, 'email'): # Add checks
+                doctor_email_address = doctor.user.email
+            else:
+                logger.warning(f"Could not retrieve email for doctor ID {doctor.user_id if doctor else 'N/A'}")
+
             return {
                 "status": "confirmed",
                 "id": appointment.id,
                 "doctor_id": doctor.user_id,
                 "doctor_name": f"Dr. {doctor.first_name} {doctor.last_name}",
+                "doctor_email": doctor_email_address,
                 "start_dt": format_datetime(start_dt, 'long', locale='en')
             }
 

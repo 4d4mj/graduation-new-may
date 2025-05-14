@@ -25,9 +25,9 @@ INPUT_PROMPT_TEMPLATE = """
 You are a content safety filter for a medical chatbot. Your role is to ensure user inputs are appropriate for the context of this medical assistant. Decide if the USER INPUT is SAFE.
 
 - SAFE means:
-    - The input is non-harmful, non-illegal, does not request PII (unless clearly related to the user's own scheduling or profile management within the system), is not related to self-harm, and does not promote misinformation.
+    - The input is non-harmful, non-illegal, does not request PII (unless clearly related to the user's own scheduling or profile management within the system, **including scheduling on Google Calendar**), is not related to self-harm, and does not promote misinformation.
     - **For doctor users:** Clinical questions, drug information requests, requests for summaries of medical topics, and search queries for medical literature are SAFE.
-    - **For all users:** Doctor names and appointment scheduling requests are ALWAYS SAFE.
+    - **For all users:** Doctor names and appointment scheduling requests, **including requests to schedule on Google Calendar,** are ALWAYS SAFE.
     - Direct requests to search the web (e.g., "search the web for X", "find articles on Y") are ALWAYS SAFE.
     - Short conversational replies (e.g., "yes", "no", "thanks", "okay") are ALWAYS SAFE.
     - Replies that continue a conversation or confirm previous statements are ALWAYS SAFE.
@@ -72,66 +72,73 @@ Input: "yes please"
 Answer:
 SAFE
 
+**EXAMPLE 7 (NEW - Safe Google Calendar Scheduling)**
+**Input: "Can you add my appointment with Dr. Jones to my Google Calendar for tomorrow at 10am?"**
+**Answer:**
+**SAFE**
+
+**EXAMPLE 8 (NEW - Safe Google Calendar Scheduling 2)**
+**Input: "i want to book an appoitment with this doctor in google calendar"**
+**Answer:**
+**SAFE**
+
 Input: {text}
 Answer:
 """
 
 OUTPUT_PROMPT_TEMPLATE = """
-You are a content safety filter for a medical chatbot. Review the CHATBOT RESPONSE to ensure it is safe, ethical, AND appropriate for the intended user. The primary goal is to prevent harm, misinformation, and out-of-scope responses, while allowing factual, helpful information for the intended user.
+You are a content safety filter for a medical chatbot. Review the CHATBOT RESPONSE to ensure it is safe, ethical, AND appropriate for the intended user. The primary goal is to prevent harm, misinformation, and out-of-scope responses.
 
 If the response is SAFE for a user, reply with the EXACT word "SAFE" on the first line.
 If it is UNSAFE, reply with the word "UNSAFE" on the first line, followed by a brief reason.
 
-CONTEXT: The chatbot has access to an internal medical knowledge base (RAG) and can perform web searches.
+CONTEXT:
+- The chatbot has access to an internal medical knowledge base (RAG) and can perform web searches.
+- The chatbot can assist with scheduling clinic appointments and sending Google Calendar invites.
+- The user_role is 'patient'.
 
-CONSIDER THE INTENDED USER :
+SPECIFIC SCENARIOS:
+- **Tool Success/Failure Messages & Follow-up Questions:** If the CHATBOT RESPONSE is reporting the success of a tool (e.g., "Appointment confirmed") AND then asks a relevant, on-topic follow-up question to offer further assistance related to that success (e.g., "Would you like to add this to your Google Calendar?"), this is generally SAFE. Technical failure messages are also generally SAFE. The assistant does not need to add generic disclaimers about medical advice if it's just handling scheduling tasks or reporting technical tool outcomes.
+- **Confirmation of Actions:** Messages confirming an action taken (like "Okay, I've cancelled that") are SAFE.
+- **Requesting Information for a Task:** If the chatbot is asking for information needed to complete a user's request (e.g., "What email should I use?", "Which time slot works?"), this is SAFE.
 
--   **If the user_role is 'doctor':**
-    -   **SAFE:** Responses providing detailed, factual medical information, including but not limited to:
-        -   Descriptions of diseases, symptoms, etiology, pathophysiology (e.g., "symptoms of breast cancer," "mechanism of hypertension").
-        -   Drug information (dosages, side effects, contraindications, mechanisms of action).
-        -   Diagnostic criteria or investigation pathways from established guidelines.
-        -   Treatment options and protocols from established guidelines or medical literature.
-        -   Summaries of medical research, clinical trial results, or information from medical textbooks.
-        -   Explanation of complex medical terminology.
-        -   Information retrieved from web searches when clearly attributed (e.g., with URLs or "Source: Web Search").
-    -   **SAFE:** Questions to the doctor for clarification if the bot needs more information to fulfill a request.
-    -   **UNSAFE for doctor (rare, but possible):** Responses that are grossly inaccurate medical statements not supported by any source, or responses that directly encourage illegal/unethical medical practices.
+PATIENT SAFETY (user_role 'patient'):
+- **SAFE:** Information directly related to scheduling, doctor availability, clinic locations, confirmations. Empathetic greetings. Stating inability to provide medical advice and recommending consultation with a human doctor *when appropriate (e.g., if the user asks for diagnosis)*.
+- **UNSAFE for patient:** Providing specific medical advice, diagnoses, treatment dosages/plans, or detailed interpretations of individual medical conditions. Do not interpret test results.
 
--   **If the user_role is 'patient' (interacting with a scheduling/basic info agent):**
-    -   **SAFE:** Information directly related to scheduling appointments, doctor availability, clinic locations, confirmation/cancellation messages.
-    -   **SAFE:** Empathetic greetings, confirmations, and polite conversational elements.
-    -   **SAFE:** Stating inability to provide medical advice, diagnosis, or treatment plans and recommending consultation with a human doctor.
-    -   **UNSAFE for patient:** Providing specific medical advice, diagnoses, treatment dosages/plans, or detailed interpretations of individual medical conditions. Do not interpret test results.
-
-GENERAL SAFETY RULES (apply to both user roles):
--   **ALWAYS UNSAFE:**
-    -   Promoting self-harm or violence.
-    -   Instructions for illegal activities.
-    -   Hate speech or discriminatory content.
-    -   Sharing unverified or blatantly false medical "cures" or harmful misinformation.
-    -   Responses that are completely nonsensical or entirely off-topic from the user's query and the medical context.
-    -   Inappropriate sharing of PII (beyond what's strictly necessary for the system's function like scheduling).
+GENERAL SAFETY RULES:
+- **ALWAYS UNSAFE:**
+    - Promoting self-harm or violence.
+    - Instructions for illegal activities.
+    - Hate speech or discriminatory content.
+    - Sharing unverified or blatantly false medical "cures" or harmful misinformation.
+    - Responses that are completely nonsensical or entirely off-topic.
+    - Inappropriate sharing of PII (unless directly related to the task at hand, like confirming an email for an invite the user agreed to).
 
 EXAMPLES:
 
-Input User Role: doctor
-Chatbot Response: "The Frank-Starling mechanism describes how an increase in ventricular preload leads to an increased stroke volume, up to a physiological limit. This is due to more optimal actin-myosin overlap. [Source: Guyton_Physiology.pdf]"
-Answer:
-SAFE
-
-Input User Role: doctor
-Chatbot Response: "Common symptoms of breast cancer include a new lump, skin changes like dimpling or peau d'orange, and nipple retraction or discharge. Many cases are also asymptomatic. [Source: Internal KB; Web Search]"
-Answer:
-SAFE
-
-Input User Role: doctor
-Chatbot Response: "Treatment options for metastatic non-small cell lung cancer with an EGFR exon 19 deletion include Osimertinib. [Source: NCCN Guidelines / WebMD.com/some_article]"
+Input User Role: patient
+Chatbot Response: "Your clinic appointment with Dr. Smith is confirmed for tomorrow at 10 AM. I've also sent a Google Calendar invite to dr.smith@example.com for this."
 Answer:
 SAFE
 
 Input User Role: patient
-Chatbot Response: "You mentioned a headache. I can't tell you what's causing it, but Dr. Smith has an opening at 2 PM tomorrow if you'd like to book an appointment to discuss it."
+Chatbot Response: "I'm sorry, I encountered a network error and couldn't send the Google Calendar invite for your appointment. Your clinic appointment is still booked."
+Answer:
+SAFE
+
+Input User Role: patient
+Chatbot Response: "I'm sorry, I was unable to schedule the Google Calendar invitation for Dr. [Doctor's Last Name, if mentioned by agent] due to a technical error with the calendar service."
+Answer:
+SAFE
+
+Input User Role: patient
+Chatbot Response: "Your appointment with Dr. [Doctor's Full Name] for [Reason for Visit] on [Date] at [Time] [Timezone] is confirmed. Would you also like me to send a Google Calendar invitation for this appointment to Dr. [Doctor's Last Name]?"
+Answer:
+SAFE
+
+Input User Role: patient
+Chatbot Response: "Okay, I need an email address to send the Google Calendar invite. What is it?"
 Answer:
 SAFE
 
@@ -249,21 +256,51 @@ def guard_in(state: dict) -> dict:
 
 
 def guard_out(state: dict) -> dict:
-    """Sanitise assistant answer."""
+    """Sanitise assistant answer and log details."""
     txt = _extract_last_reply(state)
 
-    if not _check(output_prompt, txt):
-        log.warning(
-            f"Output guardrail triggered for text: '{txt[:100]}...'. Overwriting output."
-        )
-        txt = "I'm sorry, I can't share that."
-        state["agent_name"] = "Output Guardrail"
-    else:
-        log.info("Output guardrail passed.")
-        # Optional: Clear the agent_name if it was set by the guardrail previously in the same turn?
-        # Or rely on the main agent node to set its own name later.
-        # If the agent node *always* sets agent_name, this isn't needed.
-        pass
+    # ---- START ENHANCED LOGGING ----
+    log.info(f"Output Guardrail: Processing state. Current agent_name: '{state.get('agent_name')}', current_input: '{state.get('current_input')}'")
+    log.info(f"Output Guardrail: Extracted text to check (last AI/Tool reply): '{txt[:500]}...'") # Log more of the text
+    if log.isEnabledFor(logging.DEBUG) and "messages" in state: # Avoid formatting large messages list if not debugging
+        # To prevent overly verbose logs, maybe just log the last few messages
+        last_few_messages = state['messages'][-5:] if len(state['messages']) > 5 else state['messages']
+        log.debug(f"Output Guardrail: Last few messages before check: {last_few_messages}")
+    # ---- END ENHANCED LOGGING ----
 
-    state["final_output"] = txt
+    # Preserve the agent_name from the preceding node (e.g., the main agent)
+    # We'll only change it if the guardrail blocks the output.
+    original_agent_name = state.get("agent_name")
+
+    # The _check function needs 'output_prompt' to be defined in its scope,
+    # which should be defined globally or passed to _check.
+    # Assuming 'output_prompt' is defined in the module scope like 'moderator' and 'parser'.
+    if not _check(output_prompt, txt): # 'output_prompt' must be defined
+        # ---- ADD THIS LOGGING FOR BLOCKED OUTPUT ----
+        # Re-invoke to get the raw verdict for logging, as _check only returns bool
+        # Ensure 'moderator' and 'parser' are accessible here (e.g., module-level)
+        chain_for_verdict_log = output_prompt | moderator | parser
+        verdict_raw_for_output = "Error getting verdict" # Default
+        try:
+            verdict_raw_for_output = chain_for_verdict_log.invoke({"text": txt})
+        except Exception as e:
+            log.error(f"Output Guardrail: Error invoking chain for verdict log: {e}")
+
+        log.warning(
+            f"Output Guardrail: BLOCKED text: '{txt[:200]}...'. "
+            f"Guardrail LLM raw verdict: '{verdict_raw_for_output}'. "
+            f"Overwriting with default block message."
+        )
+        # ---- END ADDED LOGGING FOR BLOCKED OUTPUT ----
+
+        blocked_message = "I'm sorry, I can't share that."
+        state["final_output"] = blocked_message
+        state["agent_name"] = "Output Guardrail" # Indicate the guardrail took action
+    else:
+        log.info(f"Output Guardrail: PASSED text: '{txt[:100]}...'")
+        state["final_output"] = txt
+        # If it passed, keep the agent_name from the node that produced 'txt'
+        state["agent_name"] = original_agent_name # Or state.get("agent_name") which is the same here
+
+    log.info(f"Output Guardrail: Final state - agent_name: '{state['agent_name']}', final_output: '{str(state['final_output'])[:100]}...'")
     return state
