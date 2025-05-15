@@ -92,6 +92,7 @@ async def chat(
                 "final_output": None,
                 "agent_name": None,
                 "user_id": user_id,
+                "role": role,
                 "user_tz": payload.user_tz,
             }
             logger.debug(

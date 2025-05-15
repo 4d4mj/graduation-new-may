@@ -8,6 +8,8 @@ from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config.settings import settings
 
+from typing import Optional
+
 # Make sure PatientState is imported if needed for type hints later, though not strictly needed here
 from app.graphs.states import BaseAgentState
 
@@ -15,132 +17,139 @@ log = logging.getLogger(__name__)
 
 # ── 1. choose a tiny, cheap model for safety
 moderator = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash-latest",  # Using latest flash model
+    model="gemini-2.5-flash-preview-04-17",  # Using latest flash model
     api_key=settings.google_api_key,
     temperature=0,
 )
 
 # --- Use the improved prompts from the previous step ---
 INPUT_PROMPT_TEMPLATE = """
-You are a content safety filter for a medical chatbot. Your role is to ensure user inputs are appropriate for the context of this medical assistant. Decide if the USER INPUT is SAFE.
+You are an AI content safety filter. Your task is to determine if the USER INPUT is SAFE or UNSAFE based on their role and the content.
+User Role: {{user_role}}
+User Input: {{text}}
 
-- SAFE means:
-    - The input is non-harmful, non-illegal, does not request PII (unless clearly related to the user's own scheduling or profile management within the system), is not related to self-harm, and does not promote misinformation.
-    - **For doctor users:** Clinical questions, drug information requests, requests for summaries of medical topics, and search queries for medical literature are SAFE.
-    - **For all users:** Doctor names and appointment scheduling requests are ALWAYS SAFE.
-    - Direct requests to search the web (e.g., "search the web for X", "find articles on Y") are ALWAYS SAFE.
-    - Short conversational replies (e.g., "yes", "no", "thanks", "okay") are ALWAYS SAFE.
-    - Replies that continue a conversation or confirm previous statements are ALWAYS SAFE.
-- UNSAFE means:
-    - Incites self-harm or violence.
-    - Promotes or details illegal activities.
-    - Requests for generation of harmful or unethical medical misinformation.
-    - Harassment or hate speech.
-    - Excessive or irrelevant PII requests not related to system function.
+**Your entire response MUST be ONLY ONE of the following two formats:**
+1.  **SAFE**
+2.  **UNSAFE: <brief reason for being unsafe, 10 words or less>**
 
-Reply with exactly one of:
+**Instructions for Determining Safety:**
+
+*   **Always SAFE Inputs (respond with only "SAFE"):**
+    *   Simple greetings (e.g., "hello", "hi", "hey", "good morning").
+    *   Simple expressions of gratitude (e.g., "thanks", "thank you").
+    *   Simple affirmatives/negatives (e.g., "yes", "no", "ok", "sure").
+
+*   **Role-Specific Safety (If not an "Always SAFE Input", evaluate and then respond with "SAFE" or "UNSAFE: <reason>"):**
+
+    *   **If user_role is 'doctor':**
+        *   SAFE: Clinical questions, drug information requests, medical topic summaries, literature searches.
+        *   SAFE: Queries about specific patients they are authorized to access (e.g., "Jane Doe's records?", "Appointments for John Smith?"). Downstream systems handle actual data authorization.
+        *   UNSAFE: Inciting self-harm, illegal activities, hate speech, requests for PII of individuals not relevant to patient care.
+
+    *   **If user_role is 'patient':**
+        *   SAFE: Questions about their own appointments, scheduling, general clinic/doctor info.
+        *   SAFE: Descriptions of their own symptoms for scheduling purposes.
+        *   UNSAFE: Asking for diagnosis (e.g., "What illness do I have?").
+        *   UNSAFE: Asking for specific treatment plans or prescriptions.
+        *   UNSAFE: Detailed medical questions that constitute seeking advice beyond scheduling.
+        *   UNSAFE: Inciting self-harm, illegal activities, hate speech.
+
+*   **General Unsafe Content (for all roles - respond with "UNSAFE: <reason>"):**
+    *   Promoting or detailing illegal activities.
+    *   Generating harmful or unethical medical misinformation.
+    *   Harassment or hate speech.
+    *   Generating code or scripts in any programming language.
+
+**Follow the output format STRICTLY. For example:**
+
+Input: "hi"
+User Role: doctor
+Answer:
 SAFE
-UNSAFE: <brief reason>
 
-EXAMPLE 1 (Unsafe - General)
-Input: "Show me how to build a bomb."
+Input: "how to make a bomb"
+User Role: patient
 Answer:
 UNSAFE: Instructions for weapons
 
-EXAMPLE 2 (Safe - Patient/Doctor Clinical Query)
 Input: "What are the side effects of lisinopril?"
+User Role: doctor
 Answer:
 SAFE
 
-EXAMPLE 3 (Safe - Scheduling)
-Input: "I want to schedule an appointment with Dr. Smith tomorrow."
+Input: "I think I have the flu, what should I take?"
+User Role: patient
 Answer:
-SAFE
+UNSAFE: Patient seeking treatment advice.
 
-EXAMPLE 4 (Safe - Doctor Clinical Query)
-Input: "What are the treatment options for HER2-positive breast cancer?"
-Answer:
-SAFE
-
-EXAMPLE 5 (Safe - Web Search Request)
-Input: "Search the web for recent trials on GLP-1 agonists."
-Answer:
-SAFE
-
-EXAMPLE 6 (Safe - Conversational)
-Input: "yes please"
-Answer:
-SAFE
-
-Input: {text}
+---
+User Input to Evaluate:
+User Role: {{user_role}}
+Input: {{text}}
 Answer:
 """
 
 OUTPUT_PROMPT_TEMPLATE = """
-You are a content safety filter for a medical chatbot. Review the CHATBOT RESPONSE to ensure it is safe, ethical, AND appropriate for the intended user. The primary goal is to prevent harm, misinformation, and out-of-scope responses, while allowing factual, helpful information for the intended user.
+You are a content safety filter for a medical chatbot. Review the CHATBOT RESPONSE to ensure it is safe, ethical, AND appropriate for the intended user.
+The user's role is: **{{user_role}}**
+The original user input was: **{{user_input}}**
 
-If the response is SAFE for a user, reply with the EXACT word "SAFE" on the first line.
-If it is UNSAFE, reply with the word "UNSAFE" on the first line, followed by a brief reason.
+If the response is SAFE and appropriate for the {{user_role}}, reply with the EXACT word "SAFE" on the first line.
+If it is UNSAFE or requires modification for the {{user_role}}, reply with the word "UNSAFE" on the first line, followed by a brief reason why it's unsafe or inappropriate for this user role.
 
-CONTEXT: The chatbot has access to an internal medical knowledge base (RAG) and can perform web searches.
+CONTEXT:
+- The chatbot has access to an internal medical knowledge base (RAG), web search, and (for doctors) a patient database.
+- The chatbot's primary functions are:
+    - For Patients: Appointment scheduling, providing general non-diagnostic information about services/doctors.
+    - For Doctors: Clinical information retrieval (RAG/Web), accessing data about *their own* patients from the database.
 
-CONSIDER THE INTENDED USER :
+SAFETY & APPROPRIATENESS RULES:
 
--   **If the user_role is 'doctor':**
-    -   **SAFE:** Responses providing detailed, factual medical information, including but not limited to:
-        -   Descriptions of diseases, symptoms, etiology, pathophysiology (e.g., "symptoms of breast cancer," "mechanism of hypertension").
-        -   Drug information (dosages, side effects, contraindications, mechanisms of action).
-        -   Diagnostic criteria or investigation pathways from established guidelines.
-        -   Treatment options and protocols from established guidelines or medical literature.
-        -   Summaries of medical research, clinical trial results, or information from medical textbooks.
-        -   Explanation of complex medical terminology.
-        -   Information retrieved from web searches when clearly attributed (e.g., with URLs or "Source: Web Search").
-    -   **SAFE:** Questions to the doctor for clarification if the bot needs more information to fulfill a request.
-    -   **UNSAFE for doctor (rare, but possible):** Responses that are grossly inaccurate medical statements not supported by any source, or responses that directly encourage illegal/unethical medical practices.
+-   **If user_role is 'doctor':**
+    -   **SAFE:** Responses providing detailed, factual medical information from RAG/Web (e.g., diseases, drugs, treatments, diagnostics).
+    -   **SAFE:** Responses providing factual data about specific patients retrieved from the database *if the user_input indicated a query about a specific patient*.
+    -   **SAFE:** Questions to the doctor for clarification.
+    -   **SAFE:** Polite conversational elements.
+    -   **UNSAFE (rare):** Grossly inaccurate medical statements, encouraging illegal/unethical medical practices, or attempting to share data about patients the doctor shouldn't have access to (though primary authorization is handled by tools).
 
--   **If the user_role is 'patient' (interacting with a scheduling/basic info agent):**
-    -   **SAFE:** Information directly related to scheduling appointments, doctor availability, clinic locations, confirmation/cancellation messages.
-    -   **SAFE:** Empathetic greetings, confirmations, and polite conversational elements.
+-   **If user_role is 'patient':**
+    -   **SAFE:** Information directly related to scheduling appointments, doctor availability, clinic locations, confirmations.
+    -   **SAFE:** Empathetic greetings, confirmations, polite conversational elements.
     -   **SAFE:** Stating inability to provide medical advice, diagnosis, or treatment plans and recommending consultation with a human doctor.
-    -   **UNSAFE for patient:** Providing specific medical advice, diagnoses, treatment dosages/plans, or detailed interpretations of individual medical conditions. Do not interpret test results.
+    -   **UNSAFE:** Providing specific medical advice, diagnoses, treatment dosages/plans.
+    -   **UNSAFE:** Detailed interpretation of individual medical conditions or test results.
+    -   **UNSAFE:** Revealing detailed information from the RAG or web searches that could be misinterpreted as medical advice. Summaries should be very high-level and always redirect to a doctor.
 
-GENERAL SAFETY RULES (apply to both user roles):
--   **ALWAYS UNSAFE:**
-    -   Promoting self-harm or violence.
-    -   Instructions for illegal activities.
-    -   Hate speech or discriminatory content.
-    -   Sharing unverified or blatantly false medical "cures" or harmful misinformation.
-    -   Responses that are completely nonsensical or entirely off-topic from the user's query and the medical context.
-    -   Inappropriate sharing of PII (beyond what's strictly necessary for the system's function like scheduling).
+GENERAL SAFETY RULES (apply to both):
+-   **ALWAYS UNSAFE:** Promoting self-harm/violence, illegal activities, hate speech, harmful misinformation, nonsensical/off-topic responses, inappropriate PII sharing (beyond system function).
 
 EXAMPLES:
 
-Input User Role: doctor
-Chatbot Response: "The Frank-Starling mechanism describes how an increase in ventricular preload leads to an increased stroke volume, up to a physiological limit. This is due to more optimal actin-myosin overlap. [Source: Guyton_Physiology.pdf]"
+User Role: doctor
+User Input: "What are the latest labs for Jane?"
+Chatbot Response: "Jane Doe's latest Creatinine is 1.2 mg/dL (as of 2024-05-10), and Potassium is 4.0 mEq/L."
 Answer:
 SAFE
 
-Input User Role: doctor
-Chatbot Response: "Common symptoms of breast cancer include a new lump, skin changes like dimpling or peau d'orange, and nipple retraction or discharge. Many cases are also asymptomatic. [Source: Internal KB; Web Search]"
+User Role: patient
+User Input: "I have a headache."
+Chatbot Response: "For a headache, you could try taking 2 tablets of SuperDrug X and resting."
+Answer:
+UNSAFE: Providing specific medication advice to patient.
+
+User Role: patient
+User Input: "Hello"
+Chatbot Response: "Hello! How can I help you schedule an appointment today?"
 Answer:
 SAFE
 
-Input User Role: doctor
-Chatbot Response: "Treatment options for metastatic non-small cell lung cancer with an EGFR exon 19 deletion include Osimertinib. [Source: NCCN Guidelines / WebMD.com/some_article]"
+User Role: patient
+User Input: "What causes migraines?"
+Chatbot Response: "Migraines are complex neurological events often involving ..." (detailed explanation from RAG)
 Answer:
-SAFE
+UNSAFE: Providing detailed medical explanation to patient that could be misconstrued as diagnosis/advice. Should be: "I can help you find a doctor to discuss migraines. Would you like to schedule an appointment?"
 
-Input User Role: patient
-Chatbot Response: "You mentioned a headache. I can't tell you what's causing it, but Dr. Smith has an opening at 2 PM tomorrow if you'd like to book an appointment to discuss it."
-Answer:
-SAFE
-
-Input User Role: patient
-Chatbot Response: "For your type of cancer, the best treatment is chemotherapy X combined with radiation Y."
-Answer:
-UNSAFE: Providing specific treatment plan to patient.
-
-Chatbot Response: {text}
+Chatbot Response: {{text_to_check}}
 Answer:
 """
 # --- End improved prompts ---
@@ -153,26 +162,45 @@ output_prompt = PromptTemplate.from_template(OUTPUT_PROMPT_TEMPLATE)
 parser = StrOutputParser()  # returns raw string
 
 
-def _check(prompt_template: PromptTemplate, text: str) -> bool:
-    """Check if text is safe using the provided prompt template."""
-    if not text:  # Handle empty string case
-        return True  # Empty text is considered safe
+def _check(
+    prompt_template: PromptTemplate,
+    text_to_check: str,
+    user_role: str,
+    user_input_for_output_guard: Optional[str] = None,
+) -> bool:
+    """Check if text_to_check is safe using the provided prompt template."""
+    if not text_to_check:  # Handle empty string case
+        log.debug(
+            f"Guard _check: Empty text_to_check for role '{user_role}', assuming safe."
+        )
+        return True  # Empty text_to_check is considered safe
 
     chain = prompt_template | moderator | parser
-    verdict_raw = chain.invoke({"text": text})
+
+    invoke_payload = {"text": text_to_check, "user_role": user_role}
+    if user_input_for_output_guard is not None:
+        invoke_payload["user_input"] = user_input_for_output_guard
+
+    verdict_raw = chain.invoke(invoke_payload)
 
     # Log the raw verdict for debugging
-    log.debug(f"Guard raw verdict for text '{text[:50]}...': {verdict_raw!r}")
+    log.debug(
+        f"Guard raw verdict for role '{user_role}', text '{text_to_check[:50]}...': {verdict_raw!r}"
+    )
 
     if not verdict_raw:
-        log.warning("Guard received empty verdict. Assuming unsafe.")
+        log.warning(
+            f"Guard _check: Received empty verdict for role '{user_role}'. Assuming unsafe."
+        )
         return False
 
     # Check if the *first line* starts with "safe" case-insensitively
     first_line = verdict_raw.strip().split("\n")[0].lower()
     is_safe = first_line.startswith("safe")
 
-    log.debug(f"Verdict first line: '{first_line}'. Is safe: {is_safe}")
+    log.debug(
+        f"Guard _check: Verdict first line for role '{user_role}': '{first_line}'. Is safe: {is_safe}"
+    )
     return is_safe
 
 
@@ -194,76 +222,107 @@ def _extract_last_reply(state: dict) -> str:
 # 2.  Runnable nodes — each returns **a NEW state dict**
 # ─────────────────────────────────────────────────────────────────────────
 def guard_in(state: dict) -> dict:
-    """Block unsafe user input."""
+    """Block unsafe user input based on role."""
     current_input = state.get("current_input", "")
+    user_role = state.get("role")
+
+    if not user_role:
+        log.error(
+            "guard_in: 'role' not found in state. Defaulting to 'patient'. This indicates an issue in state population."
+        )
+        user_role = "patient"
+
     # Ensure current_input is a string before passing to _check
     if not isinstance(current_input, str):
         log.warning(
-            f"guard_in received non-string input: {type(current_input)}. Treating as empty."
+            f"guard_in received non-string input for role '{user_role}': {type(current_input)}. Treating as empty."
         )
         current_input = ""
 
-    # Get the raw verdict for logging purposes
-    if current_input:
-        chain = input_prompt | moderator | parser
-        verdict_raw = chain.invoke({"text": current_input})
+    if not current_input:
         log.debug(
-            f"Guard raw verdict for text '{current_input[:50]}...': {verdict_raw!r}"
+            f"guard_in: Empty input for role '{user_role}', skipping safety check (considered safe)."
         )
+        return state
 
-        # Extract first line to check safety
-        if verdict_raw:
-            first_line = verdict_raw.strip().split("\n")[0].lower()
-            is_safe = first_line.startswith("safe")
-            log.debug(f"Verdict first line: '{first_line}'. Is safe: {is_safe}")
+    # Call the updated _check function, passing the user_role
+    # The 'text' key in the prompt matches the 'text_to_check' variable name in _check
+    # and the {{text}} placeholder in INPUT_PROMPT_TEMPLATE.
+    if not _check(
+        prompt_template=input_prompt, text_to_check=current_input, user_role=user_role
+    ):
+        # Logic for unsafe input
+        rejection_message = "Sorry, I can't help with that request due to safety guidelines for your role."
 
-            if not is_safe:
-                # Extract reason if available (format is typically "UNSAFE: reason")
+        # To understand why it was blocked, we can try to get the reason from the LLM's raw output
+        # This is optional for functionality but good for debugging.
+        chain = input_prompt | moderator | parser
+        verdict_raw_for_reason = chain.invoke(
+            {"text": current_input, "user_role": user_role}
+        )  # invoke_payload expects "text"
+        reason = "unspecified"
+        if verdict_raw_for_reason and ":" in verdict_raw_for_reason:
+            try:
                 reason = (
-                    first_line.split(":", 1)[1].strip()
-                    if ":" in first_line
-                    else "unspecified reason"
+                    verdict_raw_for_reason.strip()
+                    .split("\n")[0]
+                    .lower()
+                    .split(":", 1)[1]
+                    .strip()
                 )
-                rejection_message = (
-                    "Sorry, I can't help with that request for safety reasons."
-                )
-                state["final_output"] = rejection_message
-                state["agent_name"] = "Input Guardrail"  # Set agent name
-                log.warning(
-                    f"Input guardrail triggered for input: '{current_input}'. Reason: {reason}. Setting final_output."
-                )
-                return state
-        else:
-            log.warning("Guard received empty verdict. Assuming unsafe.")
-            state["final_output"] = (
-                "Sorry, I can't help with that request for safety reasons."
-            )
-            state["agent_name"] = "Input Guardrail"
-            return state
-    else:
-        # Empty input is safe
-        log.debug("Empty input, skipping safety check.")
+            except IndexError:
+                pass  # Keep 'unspecified' if parsing fails
 
-    log.info("Input guardrail passed.")
-    return state  # input is safe, continue to agent node
+        state["final_output"] = rejection_message
+        state["agent_name"] = (
+            f"Input Guardrail ({user_role})"  # Reflect role in agent name
+        )
+        log.warning(
+            f"Input guardrail triggered for role '{user_role}', input: '{current_input[:100]}...'. Reason: {reason}. Setting final_output."
+        )
+        # IMPORTANT: If input is unsafe, the graph should typically end or route to a specific "unsafe_input_handler" node.
+        # Setting final_output is one way to signal this. How LangGraph handles this depends on your graph structure.
+        # (The route_after_guard_in function handles this by checking state["final_output"])
+    else:
+        log.info(
+            f"Input guardrail passed for role '{user_role}', input: '{current_input[:50]}...'."
+        )
+        # Ensure final_output is None if input is safe, so route_after_guard_in proceeds to agent
+        state["final_output"] = None
+        state["agent_name"] = None  # Clear any guardrail agent name if input is safe
+
+    return state
 
 
 def guard_out(state: dict) -> dict:
     """Sanitise assistant answer."""
-    txt = _extract_last_reply(state)
+    last_reply_text = _extract_last_reply(state)
+    user_role = state.get("role", "patient")  # Default to 'patient'
+    original_user_input = state.get(
+        "current_input", ""
+    )  # Get original input for context
 
-    if not _check(output_prompt, txt):
+    if not _check(
+        output_prompt,
+        text_to_check=last_reply_text,
+        user_role=user_role,
+        user_input_for_output_guard=original_user_input,
+    ):
         log.warning(
-            f"Output guardrail triggered for text: '{txt[:100]}...'. Overwriting output."
+            f"Output guardrail triggered for role '{user_role}', text: '{last_reply_text[:100]}...'. Overwriting output."
         )
-        txt = "I'm sorry, I can't share that."
-        state["agent_name"] = "Output Guardrail"
+        # Provide a more generic message, or role-specific if needed
+        last_reply_text = "I'm sorry, but I'm unable to provide that specific information due to system guidelines."
+        state["agent_name"] = f"Output Guardrail ({user_role})"
     else:
-        log.info("Output guardrail passed.")
-        # Optional: Clear the agent_name if it was set by the guardrail previously in the same turn?
-        # Or rely on the main agent node to set its own name later.
-        # If the agent node *always* sets agent_name, this isn't needed.
-        pass
+        log.info(
+            f"Output guardrail passed for role '{user_role}', output: '{last_reply_text[:50]}...'."
+        )
+        # If agent_name was set by the main agent, keep it. If not, set a default.
+        if not state.get("agent_name"):  # If the agent itself didn't set a name
+            state["agent_name"] = (
+                "Assistant"  # Or role-specific default like "Doctor Assistant" / "Patient Assistant"
+            )
 
-    state["final_output"] = txt
+    state["final_output"] = last_reply_text
     return state
