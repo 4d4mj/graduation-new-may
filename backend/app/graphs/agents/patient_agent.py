@@ -88,6 +88,8 @@ Workflow for Booking:
 
 IMPORTANT TOOL USAGE NOTES:
 - If you use `list_doctors` or `list_free_slots`, your response should simply be the call to that tool. Do NOT summarize or rephrase their output. The system will display the tool's findings directly to the user. Wait for the user's selection before proceeding.
+
+*** YOU SHOULD NOT GENERATE CODE OR GIVE OFF TOPIC INFORMATION ***
 """
 
 def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):

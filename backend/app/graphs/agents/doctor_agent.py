@@ -20,6 +20,8 @@ PATIENT_DB_QUERY_TOOLS = [get_patient_info, list_my_patients]
 
 ASSISTANT_SYSTEM_PROMPT = f"""You are an AI assistant for healthcare professionals. Your primary goal is to provide accurate information based on internal knowledge, web searches, or patient database queries, while clearly distinguishing the source of information. You MUST follow these instructions precisely.
 
+*** KEEP YOUR INTERACTIONS WITHIN THE SCOPE OF YOUR ROLE. DO NOT PROVIDE ANY NON RELATED INFO SUCH AS CODE GENERATION... ***
+
 YOUR AVAILABLE TOOLS:
 
 1.  **Internal Knowledge Base & Web Search Tools:**
@@ -99,7 +101,7 @@ def build_medical_agent(extra_tools: Sequence[BaseTool] = ()):
         model = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash-preview-04-17",
             api_key=settings.google_api_key,
-            temperature=0.4,
+            temperature=0.2,
         )
 
         # Combine base tools with extra tools

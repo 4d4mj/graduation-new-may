@@ -20,7 +20,7 @@ def get_llm(model_key: str = "default") -> Optional[ChatGoogleGenerativeAI]:
         try:
             model_name_map = {
                 "default": "gemini-2.5-flash-preview-04-17",
-                "router": "models/gemini-2.5-flash-preview-04-17",
+                "router": "gemini-2.5-flash-preview-04-17",
                 "patient_analyzer": "gemini-2.5-flash-preview-04-17",
                 "rag_generator": "gemini-2.5-flash-preview-04-17",
             }
