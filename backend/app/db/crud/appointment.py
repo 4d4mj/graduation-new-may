@@ -82,7 +82,8 @@ async def create_appointment(
         return {"status": "conflict", "message": "This time slot has just been booked. Please try another time."}
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error creating appointment: {e}", exc_info=True)
+        logger.error(f"CRUD: Unexpected error creating appointment. Patient: {patient_id}, Doctor: {doctor_id}, Starts: {starts_at}, Ends: {ends_at}, Location: {location}, Notes: {notes}. ERROR: {type(e).__name__} - {e}", exc_info=True)
+        # ---- END DETAILED LOGGING ----
         return {"status": "error", "message": "An unexpected error occurred while booking."}
 
 
