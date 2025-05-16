@@ -16,6 +16,7 @@ langchain-ollama
 langgraph
 langchain-mcp-adapters
 langchain-google-genai
+langchain-groq
 langchain-community
 langchain-cohere
 langchain-postgres
