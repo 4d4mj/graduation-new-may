@@ -77,6 +77,7 @@ UNSAFE
 CHATBOT RESPONSE: "{{text}}"
 Reply:
 """
+
 # --- End improved prompts ---
 
 
@@ -168,7 +169,7 @@ def guard_in(state: dict) -> dict:
 
 
 def guard_out(state: dict) -> dict:
-    """Sanitise assistant answer."""
+    """Sanitise assistant answer and log details."""
     last_reply_text = _extract_last_reply(state)
     if not last_reply_text:
         log.debug("guard_out: Empty last reply, safe.")

@@ -75,3 +75,5 @@ instance/
 !.env.example
 
 backend/data/medical_documents/*.pdf
+
+/backend/app/tools/calendar/token.json

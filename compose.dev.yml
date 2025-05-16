@@ -21,6 +21,10 @@ services:
       - ./backend:/app
     depends_on: [db]
     ports: ["8000:8000"]   # uvicorn --reload inside Dockerfile or entrypoint
+    dns:
+      - 8.8.8.8  # Google's Public DNS
+      - 8.8.4.4  # Google's Public DNS
+      - 1.1.1.1  # Cloudflare's Public DNS
 
   frontend:
     image: node:20
