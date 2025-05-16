@@ -19,10 +19,10 @@ def get_llm(model_key: str = "default") -> Optional[ChatGoogleGenerativeAI]:
         logger.info(f"Initializing LLM for key: '{model_key}'")
         try:
             model_name_map = {
-                "default": "gemini-2.5-pro-exp-03-25",
-                "router": "models/gemini-2.5-flash-preview-04-17",
-                "patient_analyzer": "gemini-2.5-pro-exp-03-25",
-                "rag_generator": "gemini-2.5-pro-exp-03-25",
+                "default": "gemini-2.5-flash-preview-04-17",
+                "router": "gemini-2.5-flash-preview-04-17",
+                "patient_analyzer": "gemini-2.5-flash-preview-04-17",
+                "rag_generator": "gemini-2.5-flash-preview-04-17",
             }
             model_name = model_name_map.get(model_key, model_name_map["default"])
 

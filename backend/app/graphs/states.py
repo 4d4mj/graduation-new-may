@@ -17,6 +17,7 @@ class BaseAgentState(MessagesState):
     user_id: str | None = None
     user_tz: str | None = None
     now: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    role: str | None = None
 class PatientState(BaseAgentState):
     # ─── patient-only fields ──────────────────────────────────
     request_scheduling: bool = False

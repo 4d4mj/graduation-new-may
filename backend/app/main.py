@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI):
     # 3️⃣  Build medical agent  --------------------------------------
     logger.info("building patient agent")
     patient_agent.medical_agent = patient_agent.build_medical_agent(mcp_tools)
-    logger.info("building doctor agent")
+    logger.info("building doctor agent with DB tools")
     doctor_agent.medical_agent = doctor_agent.build_medical_agent(mcp_tools)
 
     # 4️⃣  Compile LangGraph graphs ----------------------------------
