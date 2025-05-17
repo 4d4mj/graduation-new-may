@@ -37,12 +37,135 @@ logging.basicConfig(
 logger = logging.getLogger("seed_database")
 
 # --- Configuration for Seed Data ---
-NUM_DOCTORS = 10
-NUM_PATIENTS_PER_DOCTOR = 5  # Each doctor will have roughly this many patients they see
+NUM_DOCTORS = 30
+NUM_PATIENTS_PER_DOCTOR = 3  # Each doctor will have roughly this many patients they see
 NUM_TOTAL_PATIENTS = NUM_DOCTORS * NUM_PATIENTS_PER_DOCTOR  # Approximate total
 NUM_APPOINTMENTS_PER_PATIENT = 2  # Each patient gets a couple of appointments
 COMMON_PASSWORD = "TestPassword123!"
 COMMON_PASSWORD_HASH = get_password_hash(COMMON_PASSWORD)
+
+DOCTOR_FIRST_NAMES = [
+    "Ahmad",
+    "Mohamad",
+    "Ali",
+    "Hassan",
+    "Hussein",
+    "Omar",
+    "Karim",
+    "Jad",
+    "Rami",
+    "Samir",
+    "Walid",
+    "Fadi",
+    "Nadim",
+    "Ziad",
+    "Tarek",
+    "Elie",
+    "Georges",
+    "Tony",
+    "Charbel",
+    "Rami",
+    "Bassam",
+    "Nabil",
+    "Fouad",
+    "Sami",
+    "Marwan",
+    "Rafic",
+    "Michel",
+    "Antoine",
+    "Joseph",
+    "Sleiman",
+    "Rita",
+    "Maya",
+    "Layal",
+    "Nour",
+    "Sara",
+    "Lina",
+    "Mira",
+    "Yara",
+    "Dina",
+    "Rana",
+    "Hiba",
+    "Racha",
+    "Mariam",
+    "Joumana",
+    "Nadine",
+    "Rola",
+    "Samar",
+    "Hind",
+    "Zeina",
+    "Carla",
+    "Jana",
+    "Lea",
+    "Christelle",
+    "Nancy",
+    "Joelle",
+    "Micheline",
+    "Paula",
+    "Sandy",
+    "Ghina",
+    "Farah",
+]
+
+
+DOCTOR_LAST_NAMES = [
+    "Khoury",
+    "Haddad",
+    "Nassar",
+    "Saad",
+    "Sleiman",
+    "Fares",
+    "Mansour",
+    "Habib",
+    "Antoun",
+    "Gerges",
+    "Saliba",
+    "Nasr",
+    "Abi Nader",
+    "El Hajj",
+    "Bou Saab",
+    "Barakat",
+    "Chahine",
+    "Maalouf",
+    "Karam",
+    "Sarkis",
+    "Azar",
+    "Mikhael",
+    "Tannous",
+    "Younes",
+    "Ghanem",
+    "Farhat",
+    "Zein",
+    "Awad",
+    "Saba",
+    "Rizk",
+    "Hanna",
+    "Jabbour",
+    "Salem",
+    "Fakhoury",
+    "Matar",
+    "Assaf",
+    "Bazzi",
+    "Elia",
+    "Doumit",
+    "Sfeir",
+    "Kfoury",
+    "Daou",
+    "Chamoun",
+    "Khalil",
+    "Issa",
+    "Najjar",
+    "Abou Jaoude",
+    "Moussa",
+    "Abou Rjeily",
+    "Tabet",
+    "Bou Khalil",
+    "Mouawad",
+    "Aoun",
+    "Bou Ghannam",
+    "Moughnieh",
+]
+
 
 DOCTOR_SPECIALTIES = [
     "Cardiology",
@@ -56,50 +179,132 @@ DOCTOR_SPECIALTIES = [
     "General Surgery",
     "Family Medicine",
     "Endocrinology",
+    "Gastroenterology",
+    "Nephrology",
+    "Hematology",
+    "Rheumatology",
+    "Pulmonology",
+    "Ophthalmology",
+    "Otolaryngology",
+    "Urology",
+    "Anesthesiology",
+    "Emergency Medicine",
+    "Infectious Disease",
+    "Geriatrics",
+    "Obstetrics and Gynecology",
+    "Plastic Surgery",
+    "Pathology",
+    "Immunology",
+    "Sports Medicine",
+    "Pain Medicine",
+    "Sleep Medicine",
+    "Rehabilitation Medicine",
+    "Vascular Surgery",
 ]
 
 PATIENT_FIRST_NAMES = [
-    "Liam",
-    "Olivia",
-    "Noah",
-    "Emma",
-    "Oliver",
-    "Ava",
-    "Elijah",
-    "Charlotte",
-    "William",
-    "Sophia",
-    "James",
-    "Amelia",
-    "Benjamin",
-    "Isabella",
-    "Lucas",
-    "Mia",
-    "Henry",
-    "Evelyn",
-    "Alexander",
-    "Harper",
+    "Ahmad",
+    "Mohamad",
+    "Ali",
+    "Hassan",
+    "Hussein",
+    "Omar",
+    "Karim",
+    "Jad",
+    "Rami",
+    "Samir",
+    "Walid",
+    "Fadi",
+    "Nadim",
+    "Ziad",
+    "Tarek",
+    "Rami",
+    "Elie",
+    "Georges",
+    "Tony",
+    "Charbel",
+    "Rita",
+    "Maya",
+    "Layal",
+    "Nour",
+    "Sara",
+    "Lina",
+    "Mira",
+    "Yara",
+    "Dina",
+    "Rana",
+    "Hiba",
+    "Racha",
+    "Mariam",
+    "Joumana",
+    "Nadine",
+    "Rola",
+    "Samar",
+    "Hind",
+    "Zeina",
+    "Carla",
+    "Jana",
+    "Lea",
+    "Christelle",
+    "Nancy",
+    "Joelle",
+    "Micheline",
+    "Paula",
+    "Sandy",
+    "Ghina",
+    "Farah",
 ]
 
 PATIENT_LAST_NAMES = [
-    "Smith",
-    "Johnson",
-    "Williams",
-    "Brown",
-    "Jones",
-    "Garcia",
-    "Miller",
-    "Davis",
-    "Rodriguez",
-    "Martinez",
-    "Hernandez",
-    "Lopez",
-    "Gonzalez",
-    "Wilson",
-    "Anderson",
-    "Thomas",
-    "Taylor",
-    "Moore",
+    "Khoury",
+    "Haddad",
+    "Nassar",
+    "Saad",
+    "Sleiman",
+    "Fares",
+    "Mansour",
+    "Habib",
+    "Antoun",
+    "Gerges",
+    "Saliba",
+    "Nasr",
+    "Abi Nader",
+    "El Hajj",
+    "Bou Saab",
+    "Barakat",
+    "Chahine",
+    "Maalouf",
+    "Karam",
+    "Sarkis",
+    "Azar",
+    "Mikhael",
+    "Tannous",
+    "Younes",
+    "Ghanem",
+    "Farhat",
+    "Zein",
+    "Awad",
+    "Saba",
+    "Rizk",
+    "Hanna",
+    "Jabbour",
+    "Salem",
+    "Fakhoury",
+    "Matar",
+    "Assaf",
+    "Bazzi",
+    "Elia",
+    "Doumit",
+    "Sfeir",
+    "Kfoury",
+    "Saba",
+    "Daou",
+    "Chamoun",
+    "Khalil",
+    "Issa",
+    "Najjar",
+    "Abou Jaoude",
+    "Moussa",
 ]
 
 ALLERGY_SUBSTANCES = [
@@ -120,7 +325,16 @@ ALLERGY_SUBSTANCES = [
     "Bee Stings",
     "Pollen",
     "Dust Mites",
+    "Cats",
+    "Dogs",
+    "Mold",
+    "Grass",
+    "Insect Stings",
+    "Sesame",
+    "Strawberries",
+    "Tomatoes",
 ]
+
 
 ALLERGY_REACTIONS = [
     "Hives",
@@ -133,7 +347,16 @@ ALLERGY_REACTIONS = [
     "Stomach Pain",
     "Headache",
     "Sneezing",
+    "Coughing",
+    "Runny Nose",
+    "Watery Eyes",
+    "Vomiting",
+    "Diarrhea",
+    "Dizziness",
+    "Chest Tightness",
+    "Wheezing",
 ]
+
 ALLERGY_SEVERITIES = ["Mild", "Moderate", "Severe"]
 
 APPOINTMENT_NOTES_KEYWORDS = [
@@ -148,6 +371,20 @@ APPOINTMENT_NOTES_KEYWORDS = [
     "Flu Symptoms",
     "Vaccination",
     "Skin Rash",
+    "Blood Pressure Check",
+    "Diabetes Management",
+    "Prescription Refill",
+    "Stomach Pain",
+    "Back Pain",
+    "Cough",
+    "Shortness of Breath",
+    "Dizziness",
+    "Annual Physical",
+    "Lab Results Review",
+    "Chest Pain",
+    "Allergy Symptoms",
+    "Ear Infection",
+    "Sore Throat",
 ]
 
 
@@ -188,9 +425,12 @@ async def seed_all_data(db: AsyncSession):
     # 1. Seed Doctors
     logger.info(f"Seeding {NUM_DOCTORS} doctors...")
     for i in range(NUM_DOCTORS):
-        first_name = f"DocFirst{i + 1}"
-        last_name = f"DocLast{i + 1}"
-        email = f"doctor{i + 1}@example.com"
+        # --- MODIFIED: Use random names from lists ---
+        first_name = random.choice(DOCTOR_FIRST_NAMES)
+        last_name = random.choice(DOCTOR_LAST_NAMES)
+        # Ensure email uniqueness if names repeat; using 'i' guarantees this
+        email = f"doctor.{first_name.lower()}.{last_name.lower()}{i + 1}@example.com"
+        # --- END MODIFICATION ---
 
         existing_user_res = await db.execute(
             select(UserModel.id).where(UserModel.email == email)
@@ -202,12 +442,11 @@ async def seed_all_data(db: AsyncSession):
                 f"Doctor user {email} already exists with ID {existing_user_id}, using existing."
             )
             created_doctors_user_ids.append(existing_user_id)
-            # Optionally, fetch and update doctor profile if needed, or assume it's fine
             continue
 
         user = UserModel(email=email, password_hash=COMMON_PASSWORD_HASH, role="doctor")
         db.add(user)
-        await db.flush()
+        await db.flush()  # Flush to get user.id
 
         doctor_profile = DoctorModel(
             user_id=user.id,
@@ -215,31 +454,32 @@ async def seed_all_data(db: AsyncSession):
             last_name=last_name,
             specialty=random.choice(DOCTOR_SPECIALTIES),
             sex=random.choice(["M", "F"]),
-            dob=random_dob(1960, 1985),
+            dob=random_dob(1960, 1990),  # Adjusted DOB range for doctors
             phone=random_phone(),
         )
         db.add(doctor_profile)
         created_doctors_user_ids.append(user.id)
         logger.info(
-            f"  Created doctor: {first_name} {last_name} ({email}), User ID: {user.id}"
+            f"  Created doctor: {first_name} {last_name} ({email}), User ID: {user.id}, Specialty: {doctor_profile.specialty}"
         )
     await db.commit()
 
-    # 2. Seed Patients
+    # 2. Seed Patients (This part remains largely the same)
     logger.info(f"Seeding {NUM_TOTAL_PATIENTS} patients...")
     for i in range(NUM_TOTAL_PATIENTS):
         first_name = random.choice(PATIENT_FIRST_NAMES)
-        # Introduce a couple of patients with the same first name for ambiguity testing
-        if i == 0:
+        if i == 0:  # Specific Alice for testing
             first_name = "Alice"
             last_name = "Wonder"
-        elif i == 1:
+        elif i == 1:  # Another Alice
             first_name = "Alice"
             last_name = "Smith"
         else:
             last_name = random.choice(PATIENT_LAST_NAMES)
 
-        email = f"patient{i + 1}@example.com"
+        # Ensure patient email uniqueness
+        email = f"patient.{first_name.lower()}.{last_name.lower()}{i + 1}@example.com"
+        email = email.replace(" ", "")  # Remove spaces from email
 
         existing_user_res = await db.execute(
             select(UserModel.id).where(UserModel.email == email)
@@ -251,17 +491,14 @@ async def seed_all_data(db: AsyncSession):
                 f"Patient user {email} already exists with ID {existing_user_id}, using existing."
             )
             created_patients_user_ids.append(existing_user_id)
-            patient_id_to_name_map[existing_user_id] = (
-                f"{first_name} {last_name}"  # Store name
-            )
-            # Optionally, fetch and update patient profile
+            patient_id_to_name_map[existing_user_id] = f"{first_name} {last_name}"
             continue
 
         user = UserModel(
             email=email, password_hash=COMMON_PASSWORD_HASH, role="patient"
         )
         db.add(user)
-        await db.flush()
+        await db.flush()  # Flush to get user.id
 
         patient_profile = PatientModel(
             user_id=user.id,
@@ -286,43 +523,41 @@ async def seed_all_data(db: AsyncSession):
         )
         return
 
-    # 3. Seed Appointments - More strategic distribution
+    # 3. Seed Appointments (This part remains largely the same)
     logger.info(f"Seeding appointments with more varied dates...")
     appointment_count = 0
-    now_utc_dt = datetime.now(TZ.utc)  # Use TZ alias
+    now_utc_dt = datetime.now(TZ.utc)
 
-    # Ensure at least one doctor has many patients for pagination testing
     doctor_for_pagination_test = (
         created_doctors_user_ids[0] if created_doctors_user_ids else None
     )
 
     for i, patient_user_id in enumerate(created_patients_user_ids):
-        # Assign most patients to the doctor_for_pagination_test
-        if doctor_for_pagination_test and i < (
-            NUM_TOTAL_PATIENTS * 0.7
-        ):  # ~70% of patients go to this doctor
+        if doctor_for_pagination_test and i < (NUM_TOTAL_PATIENTS * 0.7):
             assigned_doctor_id = doctor_for_pagination_test
-        else:  # Distribute remaining patients among other doctors
+        else:
             assigned_doctor_id = random.choice(created_doctors_user_ids)
 
-        # Create varied appointments for Patient ID user_id 101 (Alice Wonderland, assuming her user_id becomes 101 based on typical DB sequences)
-        # We need to find Alice Wonderland's actual created ID
-        alice_wonder_id = None
-        for pid, name in patient_id_to_name_map.items():
-            if name == "Alice Wonder":
-                alice_wonder_id = pid
-                break
-
-        alice_smith_id = None
-        for pid, name in patient_id_to_name_map.items():
-            if name == "Alice Smith":
-                alice_smith_id = pid
-                break
+        alice_wonder_id = next(
+            (
+                pid
+                for pid, name in patient_id_to_name_map.items()
+                if name == "Alice Wonder"
+            ),
+            None,
+        )
+        alice_smith_id = next(
+            (
+                pid
+                for pid, name in patient_id_to_name_map.items()
+                if name == "Alice Smith"
+            ),
+            None,
+        )
 
         date_scenarios = []
-        if (
-            patient_user_id == alice_wonder_id and assigned_doctor_id
-        ):  # Specific scenarios for "Alice Wonder"
+        # ... (your existing date_scenarios logic - looks good for variety)
+        if patient_user_id == alice_wonder_id and assigned_doctor_id:
             date_scenarios = [
                 (
                     "upcoming_3_days",
@@ -344,15 +579,9 @@ async def seed_all_data(db: AsyncSession):
                     now_utc_dt - timedelta(days=40),
                     "Old record for Alice Wonder",
                 ),
-                (
-                    "today",
-                    now_utc_dt,
-                    "Today's check for Alice Wonder",
-                ),  # For testing "today"
+                ("today", now_utc_dt, "Today's check for Alice Wonder"),
             ]
-        elif (
-            patient_user_id == alice_smith_id and assigned_doctor_id
-        ):  # Specific for "Alice Smith" for ambiguity
+        elif patient_user_id == alice_smith_id and assigned_doctor_id:
             date_scenarios = [
                 (
                     "upcoming_4_days",
@@ -360,10 +589,10 @@ async def seed_all_data(db: AsyncSession):
                     "Check-up for Alice Smith",
                 ),
             ]
-        else:  # Generic appointments for other patients
-            num_appts = random.randint(1, 3)
+        else:
+            num_appts = random.randint(1, NUM_APPOINTMENTS_PER_PATIENT)  # Use config
             for _ in range(num_appts):
-                days_offset = random.randint(-60, 60)  # Wider range
+                days_offset = random.randint(-60, 60)
                 date_scenarios.append(
                     (
                         f"random_offset_{days_offset}",
@@ -378,16 +607,14 @@ async def seed_all_data(db: AsyncSession):
             starts_at = appt_datetime_utc.replace(
                 hour=hour, minute=minute, second=0, microsecond=0
             )
-            ends_at = starts_at + timedelta(
-                minutes=random.choice([15, 30, 45])
-            )  # Varied duration
+            ends_at = starts_at + timedelta(minutes=random.choice([15, 30, 45]))
 
             appointment = AppointmentModel(
                 patient_id=patient_user_id,
                 doctor_id=assigned_doctor_id,
                 starts_at=starts_at,
                 ends_at=ends_at,
-                location=f"Clinic {random.choice(['X', 'Y', 'Z'])}",
+                location=f"Clinic {random.choice(['A', 'B', 'C'])}",  # Simpler clinic names
                 notes=note_reason,
             )
             db.add(appointment)
@@ -395,23 +622,30 @@ async def seed_all_data(db: AsyncSession):
     await db.commit()
     logger.info(f"Seeded {appointment_count} appointments.")
 
-    # 4. Seed Allergies
+    # 4. Seed Allergies (This part remains largely the same)
     logger.info(f"Seeding allergies for a subset of patients...")
     allergy_count = 0
-    # Ensure Alice Wonder and Alice Smith have some allergies for testing
     patients_for_allergies = set()
+    alice_wonder_id = next(
+        (pid for pid, name in patient_id_to_name_map.items() if name == "Alice Wonder"),
+        None,
+    )
+    alice_smith_id = next(
+        (pid for pid, name in patient_id_to_name_map.items() if name == "Alice Smith"),
+        None,
+    )
+
     if alice_wonder_id:
         patients_for_allergies.add(alice_wonder_id)
     if alice_smith_id:
         patients_for_allergies.add(alice_smith_id)
 
-    # Add some other random patients to have allergies
     num_other_patients_with_allergies = NUM_TOTAL_PATIENTS // 3
     if len(created_patients_user_ids) > len(patients_for_allergies):
         remaining_patient_ids = list(
             set(created_patients_user_ids) - patients_for_allergies
         )
-        if remaining_patient_ids:  # Check if list is not empty
+        if remaining_patient_ids:
             patients_for_allergies.update(
                 random.sample(
                     remaining_patient_ids,
@@ -422,9 +656,8 @@ async def seed_all_data(db: AsyncSession):
             )
 
     for patient_user_id in patients_for_allergies:
-        num_allergies = 0
+        # ... (your existing allergy seeding logic - looks good for variety) ...
         if patient_user_id == alice_wonder_id:
-            num_allergies = 2  # Ensure Alice Wonder has specific allergies
             db.add(
                 AllergyModel(
                     patient_id=patient_user_id,
@@ -443,7 +676,6 @@ async def seed_all_data(db: AsyncSession):
             )
             allergy_count += 2
         elif patient_user_id == alice_smith_id:
-            num_allergies = 1
             db.add(
                 AllergyModel(
                     patient_id=patient_user_id,
@@ -454,10 +686,8 @@ async def seed_all_data(db: AsyncSession):
             )
             allergy_count += 1
         else:
-            num_allergies = random.randint(
-                1, 3
-            )  # Other patients get 1-3 random allergies
-            for _ in range(num_allergies):
+            num_allergies_for_patient = random.randint(1, 3)
+            for _ in range(num_allergies_for_patient):
                 db.add(
                     AllergyModel(
                         patient_id=patient_user_id,
@@ -473,7 +703,6 @@ async def seed_all_data(db: AsyncSession):
 
 
 async def main(should_clear: bool):
-    # ... (main function remains mostly the same, ensure it calls the updated seed_all_data)
     logger.info(f"Connecting to database at: {app_settings.database_url}")
     engine = create_async_engine(str(app_settings.database_url))
     AsyncSessionLocal = sessionmaker(
