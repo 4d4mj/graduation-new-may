@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)  # Corrected logger name
 
 secure_cookie = env == "production"
 
+
 # 1️⃣ Add a helper function to find the most recent tool message
 def _find_last_tool_or_ai_message(messages):
     """
@@ -39,12 +40,13 @@ def _find_last_tool_or_ai_message(messages):
     # If we get here, there was no ToolMessage in the current turn
     return messages[-1].content if messages else None  # Fallback to last message
 
+
 @router.post("/", response_model=ChatResponse, status_code=200)
 async def chat(
     payload: ChatRequest,
     request: Request,
     current_user: dict = Depends(get_current_user),
-    session: str | None = Cookie(default=None, alias="session")
+    session: str | None = Cookie(default=None, alias="session"),
 ):
     # Use the user data from middleware instead of decoding the token again
     user_id = current_user["user_id"]
@@ -187,8 +189,8 @@ async def chat(
         agent=agent_name,
         messages=response_messages,
         session=session,
-        session_id=session,                    # Include history
-        interrupt_id=None # Explicitly null unless set by GraphInterrupt block
+        session_id=session,  # Include history
+        interrupt_id=None,  # Explicitly null unless set by GraphInterrupt block
     )
 
 
@@ -196,7 +198,7 @@ async def chat(
 @router.post("/test", response_model=ChatResponse, status_code=200)
 async def testChat(
     current_user: dict = Depends(get_current_user),
-    session: str | None = Cookie(default=None, alias="session")
+    session: str | None = Cookie(default=None, alias="session"),
 ):
     """
     Simulates a more realistic chat interaction for UI testing.
@@ -206,15 +208,17 @@ async def testChat(
 
     # --- Simulate Realistic Interaction ---
     # Select a random realistic reply
-    reply = random.choice([
-        "That's an interesting point. Could you elaborate a bit more on that?",
-        "I understand. Based on what you've said, perhaps we could explore options like [Option A] or [Option B]. What are your thoughts?",
-        "Thank you for sharing that. Let me process this information. One moment please...",
-        "Okay, I've noted that down. Is there anything else you'd like to add or discuss regarding this topic?",
-        "Processing your request... This might take a few moments. In the meantime, have you considered [Related Topic]?",
-        "Acknowledged. I'm accessing the relevant information now. This is a complex area, so accuracy is key.",
-        "Let's break that down. The first aspect to consider is [...], followed by [...]. Does that make sense so far?",
-    ])
+    reply = random.choice(
+        [
+            "That's an interesting point. Could you elaborate a bit more on that?",
+            "I understand. Based on what you've said, perhaps we could explore options like [Option A] or [Option B]. What are your thoughts?",
+            "Thank you for sharing that. Let me process this information. One moment please...",
+            "Okay, I've noted that down. Is there anything else you'd like to add or discuss regarding this topic?",
+            "Processing your request... This might take a few moments. In the meantime, have you considered [Related Topic]?",
+            "Acknowledged. I'm accessing the relevant information now. This is a complex area, so accuracy is key.",
+            "Let's break that down. The first aspect to consider is [...], followed by [...]. Does that make sense so far?",
+        ]
+    )
 
     reply = '{"type": "slots", "doctor": "Chen", "date": "May 6, 2025", "options": ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:30", "15:00", "15:30", "16:00", "16:30"]}'
 

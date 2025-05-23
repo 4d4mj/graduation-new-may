@@ -9,6 +9,7 @@ import random  # For generating varied data
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text, select  # For raw SQL if needed for clearing
+from sqlalchemy.exc import IntegrityError
 
 # Add project root to sys.path to allow importing from app
 import sys
@@ -38,9 +39,9 @@ logger = logging.getLogger("seed_database")
 
 # --- Configuration for Seed Data ---
 NUM_DOCTORS = 30
-NUM_PATIENTS_PER_DOCTOR = 3  # Each doctor will have roughly this many patients they see
+NUM_PATIENTS_PER_DOCTOR = 5  # Each doctor will have roughly this many patients they see
 NUM_TOTAL_PATIENTS = NUM_DOCTORS * NUM_PATIENTS_PER_DOCTOR  # Approximate total
-NUM_APPOINTMENTS_PER_PATIENT = 2  # Each patient gets a couple of appointments
+NUM_APPOINTMENTS_PER_PATIENT = 3  # Each patient gets a couple of appointments
 COMMON_PASSWORD = "TestPassword123!"
 COMMON_PASSWORD_HASH = get_password_hash(COMMON_PASSWORD)
 
@@ -425,12 +426,11 @@ async def seed_all_data(db: AsyncSession):
     # 1. Seed Doctors
     logger.info(f"Seeding {NUM_DOCTORS} doctors...")
     for i in range(NUM_DOCTORS):
-        # --- MODIFIED: Use random names from lists ---
         first_name = random.choice(DOCTOR_FIRST_NAMES)
         last_name = random.choice(DOCTOR_LAST_NAMES)
-        # Ensure email uniqueness if names repeat; using 'i' guarantees this
-        email = f"doctor.{first_name.lower()}.{last_name.lower()}{i + 1}@example.com"
-        # --- END MODIFICATION ---
+        email = f"doctor.{first_name.lower()}.{last_name.lower()}{i + 1}@example.com".replace(
+            " ", ""
+        )
 
         existing_user_res = await db.execute(
             select(UserModel.id).where(UserModel.email == email)
@@ -441,45 +441,63 @@ async def seed_all_data(db: AsyncSession):
             logger.info(
                 f"Doctor user {email} already exists with ID {existing_user_id}, using existing."
             )
-            created_doctors_user_ids.append(existing_user_id)
+            if (
+                existing_user_id not in created_doctors_user_ids
+            ):  # Ensure no duplicates in our list
+                created_doctors_user_ids.append(existing_user_id)
             continue
 
         user = UserModel(email=email, password_hash=COMMON_PASSWORD_HASH, role="doctor")
         db.add(user)
-        await db.flush()  # Flush to get user.id
+        try:
+            await (
+                db.flush()
+            )  # Get user.id before commit to avoid issues if commit fails later
+            doctor_profile = DoctorModel(
+                user_id=user.id,
+                first_name=first_name,
+                last_name=last_name,
+                specialty=random.choice(DOCTOR_SPECIALTIES),
+                sex=random.choice(["M", "F"]),
+                dob=random_dob(1960, 1990),
+                phone=random_phone(),
+            )
+            db.add(doctor_profile)
+            created_doctors_user_ids.append(user.id)
+            logger.info(
+                f"  Added to session: Dr. {first_name} {last_name} ({email}), User ID: {user.id}"
+            )
+        except Exception as e:  # Catch potential errors during add/flush
+            await db.rollback()
+            logger.error(f"Error adding/flushing doctor {email}: {e}", exc_info=True)
+            continue  # Skip this doctor
 
-        doctor_profile = DoctorModel(
-            user_id=user.id,
-            first_name=first_name,
-            last_name=last_name,
-            specialty=random.choice(DOCTOR_SPECIALTIES),
-            sex=random.choice(["M", "F"]),
-            dob=random_dob(1960, 1990),  # Adjusted DOB range for doctors
-            phone=random_phone(),
-        )
-        db.add(doctor_profile)
-        created_doctors_user_ids.append(user.id)
-        logger.info(
-            f"  Created doctor: {first_name} {last_name} ({email}), User ID: {user.id}, Specialty: {doctor_profile.specialty}"
-        )
-    await db.commit()
+    try:
+        await db.commit()  # Commit all doctors once
+        logger.info(f"Committed {len(created_doctors_user_ids)} doctors.")
+    except IntegrityError as e:
+        await db.rollback()
+        logger.error(f"Integrity error committing doctors: {e.orig}", exc_info=True)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Unexpected error committing doctors: {e}", exc_info=True)
 
-    # 2. Seed Patients (This part remains largely the same)
+    # 2. Seed Patients
     logger.info(f"Seeding {NUM_TOTAL_PATIENTS} patients...")
     for i in range(NUM_TOTAL_PATIENTS):
         first_name = random.choice(PATIENT_FIRST_NAMES)
-        if i == 0:  # Specific Alice for testing
+        if i == 0:
             first_name = "Alice"
             last_name = "Wonder"
-        elif i == 1:  # Another Alice
+        elif i == 1:
             first_name = "Alice"
             last_name = "Smith"
         else:
             last_name = random.choice(PATIENT_LAST_NAMES)
 
-        # Ensure patient email uniqueness
-        email = f"patient.{first_name.lower()}.{last_name.lower()}{i + 1}@example.com"
-        email = email.replace(" ", "")  # Remove spaces from email
+        email = f"patient.{first_name.lower()}.{last_name.lower()}{i + 1}@example.com".replace(
+            " ", ""
+        )
 
         existing_user_res = await db.execute(
             select(UserModel.id).where(UserModel.email == email)
@@ -490,7 +508,8 @@ async def seed_all_data(db: AsyncSession):
             logger.info(
                 f"Patient user {email} already exists with ID {existing_user_id}, using existing."
             )
-            created_patients_user_ids.append(existing_user_id)
+            if existing_user_id not in created_patients_user_ids:
+                created_patients_user_ids.append(existing_user_id)
             patient_id_to_name_map[existing_user_id] = f"{first_name} {last_name}"
             continue
 
@@ -498,34 +517,49 @@ async def seed_all_data(db: AsyncSession):
             email=email, password_hash=COMMON_PASSWORD_HASH, role="patient"
         )
         db.add(user)
-        await db.flush()  # Flush to get user.id
+        try:
+            await db.flush()
+            patient_profile = PatientModel(
+                user_id=user.id,
+                first_name=first_name,
+                last_name=last_name,
+                sex=random.choice(["M", "F"]),
+                dob=random_dob(1950, 2015),
+                phone=random_phone(),
+                address=random_address(i + 1),
+            )
+            db.add(patient_profile)
+            created_patients_user_ids.append(user.id)
+            patient_id_to_name_map[user.id] = f"{first_name} {last_name}"
+            logger.info(
+                f"  Added to session: Patient {first_name} {last_name} ({email}), User ID: {user.id}"
+            )
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Error adding/flushing patient {email}: {e}", exc_info=True)
+            continue
 
-        patient_profile = PatientModel(
-            user_id=user.id,
-            first_name=first_name,
-            last_name=last_name,
-            sex=random.choice(["M", "F"]),
-            dob=random_dob(1950, 2015),
-            phone=random_phone(),
-            address=random_address(i + 1),
-        )
-        db.add(patient_profile)
-        created_patients_user_ids.append(user.id)
-        patient_id_to_name_map[user.id] = f"{first_name} {last_name}"
-        logger.info(
-            f"  Created patient: {first_name} {last_name} ({email}), User ID: {user.id}"
-        )
-    await db.commit()
+    try:
+        await db.commit()  # Commit all patients once
+        logger.info(f"Committed {len(created_patients_user_ids)} patients.")
+    except IntegrityError as e:
+        await db.rollback()
+        logger.error(f"Integrity error committing patients: {e.orig}", exc_info=True)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Unexpected error committing patients: {e}", exc_info=True)
 
     if not created_doctors_user_ids or not created_patients_user_ids:
         logger.error(
-            "Critical: No doctors or patients available for seeding appointments/allergies. Exiting."
+            "Critical: No doctors or patients available for seeding appointments/allergies. Exiting dependent seeding."
         )
         return
 
-    # 3. Seed Appointments (This part remains largely the same)
-    logger.info(f"Seeding appointments with more varied dates...")
-    appointment_count = 0
+    # 3. Seed Appointments
+    logger.info(f"Seeding appointments with individual commits and error handling...")
+    attempted_appointment_count = 0
+    successful_appointment_inserts = 0
+    failed_appointment_inserts = 0
     now_utc_dt = datetime.now(TZ.utc)
 
     doctor_for_pagination_test = (
@@ -533,10 +567,25 @@ async def seed_all_data(db: AsyncSession):
     )
 
     for i, patient_user_id in enumerate(created_patients_user_ids):
-        if doctor_for_pagination_test and i < (NUM_TOTAL_PATIENTS * 0.7):
+        if not doctor_for_pagination_test:  # Safety check
+            assigned_doctor_id = (
+                random.choice(created_doctors_user_ids)
+                if created_doctors_user_ids
+                else None
+            )
+        elif i < (
+            NUM_TOTAL_PATIENTS * 0.7
+        ):  # Ensure enough appointments for the test doctor
             assigned_doctor_id = doctor_for_pagination_test
         else:
-            assigned_doctor_id = random.choice(created_doctors_user_ids)
+            assigned_doctor_id = (
+                random.choice(created_doctors_user_ids)
+                if created_doctors_user_ids
+                else None
+            )
+
+        if not assigned_doctor_id:  # If no doctors, skip
+            continue
 
         alice_wonder_id = next(
             (
@@ -556,8 +605,7 @@ async def seed_all_data(db: AsyncSession):
         )
 
         date_scenarios = []
-        # ... (your existing date_scenarios logic - looks good for variety)
-        if patient_user_id == alice_wonder_id and assigned_doctor_id:
+        if patient_user_id == alice_wonder_id:
             date_scenarios = [
                 (
                     "upcoming_3_days",
@@ -580,8 +628,18 @@ async def seed_all_data(db: AsyncSession):
                     "Old record for Alice Wonder",
                 ),
                 ("today", now_utc_dt, "Today's check for Alice Wonder"),
+                (
+                    "specific_future_1",
+                    datetime(2025, 6, 22, tzinfo=TZ.utc),
+                    "Specific future date 1 for Alice",
+                ),
+                (
+                    "specific_future_2",
+                    datetime(2025, 6, 22, tzinfo=TZ.utc),
+                    "Specific future date 2 for Alice - different time",
+                ),
             ]
-        elif patient_user_id == alice_smith_id and assigned_doctor_id:
+        elif patient_user_id == alice_smith_id:
             date_scenarios = [
                 (
                     "upcoming_4_days",
@@ -590,7 +648,7 @@ async def seed_all_data(db: AsyncSession):
                 ),
             ]
         else:
-            num_appts = random.randint(1, NUM_APPOINTMENTS_PER_PATIENT)  # Use config
+            num_appts = random.randint(1, NUM_APPOINTMENTS_PER_PATIENT)
             for _ in range(num_appts):
                 days_offset = random.randint(-60, 60)
                 date_scenarios.append(
@@ -601,30 +659,91 @@ async def seed_all_data(db: AsyncSession):
                     )
                 )
 
-        for desc, appt_datetime_utc, note_reason in date_scenarios:
-            hour = random.randint(8, 16)
-            minute = random.choice([0, 15, 30, 45])
-            starts_at = appt_datetime_utc.replace(
-                hour=hour, minute=minute, second=0, microsecond=0
+        # To reduce collisions, keep track of (doctor_id, starts_at) for the current batch being processed
+        # This is a local check for the current seeder run, not a DB check.
+        local_doctor_day_slots = {}  # doctor_id -> {date_str -> set_of_start_hours_minutes}
+
+        for desc, appt_datetime_base_utc, note_reason in date_scenarios:
+            attempted_appointment_count += 1
+
+            # Try to find a unique slot for this doctor on this day locally
+            slot_found_locally = False
+            for attempt in range(
+                10
+            ):  # Try up to 10 times to find a unique slot for this appt
+                hour = random.randint(8, 16)
+                minute_options = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
+                minute = random.choice(minute_options)
+
+                current_starts_at = appt_datetime_base_utc.replace(
+                    hour=hour, minute=minute, second=0, microsecond=0
+                )
+
+                date_key = current_starts_at.date().isoformat()
+                time_key = (current_starts_at.hour, current_starts_at.minute)
+
+                if assigned_doctor_id not in local_doctor_day_slots:
+                    local_doctor_day_slots[assigned_doctor_id] = {}
+                if date_key not in local_doctor_day_slots[assigned_doctor_id]:
+                    local_doctor_day_slots[assigned_doctor_id][date_key] = set()
+
+                if time_key not in local_doctor_day_slots[assigned_doctor_id][date_key]:
+                    local_doctor_day_slots[assigned_doctor_id][date_key].add(time_key)
+                    slot_found_locally = True
+                    break  # Found a locally unique slot for this doctor/day/time
+                # If not found, loop will try a new random time
+
+            if not slot_found_locally:
+                logger.warning(
+                    f"Could not find a locally unique slot for doctor {assigned_doctor_id} on {date_key} after 10 attempts. Skipping this specific appointment."
+                )
+                failed_appointment_inserts += 1
+                continue  # Skip this appointment if no locally unique slot found
+
+            starts_at = current_starts_at  # Use the slot found
+            duration_options_minutes = [15, 30, 45, 60]
+            ends_at = starts_at + timedelta(
+                minutes=random.choice(duration_options_minutes)
             )
-            ends_at = starts_at + timedelta(minutes=random.choice([15, 30, 45]))
 
             appointment = AppointmentModel(
                 patient_id=patient_user_id,
                 doctor_id=assigned_doctor_id,
                 starts_at=starts_at,
                 ends_at=ends_at,
-                location=f"Clinic {random.choice(['A', 'B', 'C'])}",  # Simpler clinic names
+                location=f"Clinic {random.choice(['A', 'B', 'C'])}",
                 notes=note_reason,
             )
             db.add(appointment)
-            appointment_count += 1
-    await db.commit()
-    logger.info(f"Seeded {appointment_count} appointments.")
+            try:
+                await db.commit()
+                successful_appointment_inserts += 1
+            except IntegrityError as e:
+                await db.rollback()
+                logger.warning(
+                    f"Skipped duplicate appointment for doctor {assigned_doctor_id} at {starts_at} due to DB unique constraint. Error: {e.orig.diag.message_detail if hasattr(e.orig, 'diag') else e.orig}"
+                )
+                failed_appointment_inserts += 1
+            except Exception as e_other:
+                await db.rollback()
+                logger.error(
+                    f"Error committing appointment for doctor {assigned_doctor_id} at {starts_at}: {e_other}",
+                    exc_info=True,
+                )
+                failed_appointment_inserts += 1
 
-    # 4. Seed Allergies (This part remains largely the same)
+    logger.info(f"Attempted to seed {attempted_appointment_count} appointments.")
+    logger.info(f"Successfully seeded {successful_appointment_inserts} appointments.")
+    if failed_appointment_inserts > 0:
+        logger.warning(
+            f"Failed/Skipped {failed_appointment_inserts} appointments due to conflicts or errors."
+        )
+
+    # 4. Seed Allergies
     logger.info(f"Seeding allergies for a subset of patients...")
     allergy_count = 0
+    # ... (rest of your allergy seeding logic, which seems fine as it doesn't have unique constraints like appointments) ...
+    # Make sure to commit after adding allergies
     patients_for_allergies = set()
     alice_wonder_id = next(
         (pid for pid, name in patient_id_to_name_map.items() if name == "Alice Wonder"),
@@ -645,18 +764,17 @@ async def seed_all_data(db: AsyncSession):
         remaining_patient_ids = list(
             set(created_patients_user_ids) - patients_for_allergies
         )
-        if remaining_patient_ids:
-            patients_for_allergies.update(
-                random.sample(
-                    remaining_patient_ids,
-                    k=min(
-                        len(remaining_patient_ids), num_other_patients_with_allergies
-                    ),
-                )
+        if remaining_patient_ids:  # Check if list is not empty
+            patients_to_sample = min(
+                len(remaining_patient_ids), num_other_patients_with_allergies
             )
+            if patients_to_sample > 0:
+                patients_for_allergies.update(
+                    random.sample(remaining_patient_ids, k=patients_to_sample)
+                )
 
     for patient_user_id in patients_for_allergies:
-        # ... (your existing allergy seeding logic - looks good for variety) ...
+        num_allergies_for_patient = 0
         if patient_user_id == alice_wonder_id:
             db.add(
                 AllergyModel(
@@ -674,7 +792,7 @@ async def seed_all_data(db: AsyncSession):
                     severity="Severe",
                 )
             )
-            allergy_count += 2
+            num_allergies_for_patient = 2
         elif patient_user_id == alice_smith_id:
             db.add(
                 AllergyModel(
@@ -684,7 +802,7 @@ async def seed_all_data(db: AsyncSession):
                     severity="Mild",
                 )
             )
-            allergy_count += 1
+            num_allergies_for_patient = 1
         else:
             num_allergies_for_patient = random.randint(1, 3)
             for _ in range(num_allergies_for_patient):
@@ -696,9 +814,15 @@ async def seed_all_data(db: AsyncSession):
                         severity=random.choice(ALLERGY_SEVERITIES),
                     )
                 )
-                allergy_count += 1
-    await db.commit()
-    logger.info(f"Seeded {allergy_count} allergies.")
+        allergy_count += num_allergies_for_patient
+
+    try:
+        await db.commit()  # Commit all allergies
+        logger.info(f"Seeded {allergy_count} allergies.")
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error committing allergies: {e}", exc_info=True)
+
     logger.info("Database seeding completed.")
 
 

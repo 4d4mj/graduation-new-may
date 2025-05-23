@@ -1,14 +1,20 @@
 import logging
-from typing import Optional, Annotated, List, Dict, Any
+from typing import Optional, Annotated, List, Dict, Any, Union
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
+from langgraph.types import interrupt
 
 from app.db.session import tool_db_session
 from app.db.crud.patient import (
     find_patients_by_name_and_verify_doctor_link,
     get_patients_for_doctor,
 )
-from app.db.crud.appointment import get_appointments
+from app.db.crud.appointment import (
+    get_appointments,
+    get_doctor_schedule_for_date,
+    delete_appointment,
+    get_appointment,
+)
 from app.db.models import PatientModel
 
 from app.db.crud.allergy import get_allergies_for_patient
@@ -18,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import (
     datetime,
     timedelta,
-    date as DDateClass,
+    date as DateClass,
     timezone as TZ,
 )  # Alias date
 from zoneinfo import ZoneInfo  # Preferred for IANA timezones
@@ -386,3 +392,112 @@ async def get_patient_appointment_history(
                 exc_info=True,
             )
             return "An unexpected error occurred while trying to retrieve patient appointment history."
+
+
+@tool("get_my_schedule")
+async def get_my_schedule(
+    date_query: Annotated[
+        str,
+        "The date for which to fetch the schedule (e.g., 'today', 'tomorrow', '2025-07-10', 'next Monday'). Defaults to 'today' if not specified or ambiguous.",
+    ],
+    user_id: Annotated[int, InjectedState("user_id")],  # This is the doctor's ID
+    user_tz: Annotated[Optional[str], InjectedState("user_tz")],
+) -> str:
+    """
+    Fetches the calling doctor's own appointment schedule for a specified date.
+    Use this when a doctor asks about their own appointments for a particular day.
+    For example: 'What's my schedule for today?', 'Do I have any appointments tomorrow?', 'Show my schedule for October 26th'.
+    """
+    logger.info(
+        f"Tool 'get_my_schedule' invoked by doctor_id '{user_id}' for date_query: '{date_query}' with user_tz: '{user_tz}'"
+    )
+
+    effective_user_tz_str = (
+        user_tz or "UTC"
+    )  # Default to UTC if user_tz is not available
+    try:
+        effective_user_tz = ZoneInfo(effective_user_tz_str)
+    except Exception:
+        logger.warning(
+            f"Invalid user_tz '{user_tz}', defaulting to UTC for date parsing."
+        )
+        effective_user_tz = ZoneInfo("UTC")
+        effective_user_tz_str = "UTC"
+
+    now_user_tz = datetime.now(effective_user_tz)
+
+    if (
+        not date_query
+        or date_query.lower() == "what date?"
+        or date_query.lower() == "what day?"
+    ):
+        # If LLM asks for clarification or sends an empty query, default to today
+        target_date_dt = now_user_tz
+        date_query_for_log = "today (defaulted)"
+    else:
+        # Parse the date_query string
+        # RELATIVE_BASE is important for "today", "tomorrow" to be relative to user's timezone
+        target_date_dt = dateparser.parse(
+            date_query,
+            settings={
+                "PREFER_DATES_FROM": "future",  # Slightly prefer future for ambiguous queries like "Monday"
+                "RELATIVE_BASE": now_user_tz,  # Critical for "today", "tomorrow"
+                "TIMEZONE": effective_user_tz_str,  # Interpret query in user's TZ
+                # 'TO_TIMEZONE': 'UTC' # Not strictly needed here as we only need the date part
+            },
+        )
+
+    if not target_date_dt:
+        logger.warning(
+            f"Could not parse date_query: '{date_query}' for doctor_id '{user_id}'. Defaulting to today."
+        )
+        target_date_dt = now_user_tz  # Default to today if parsing fails
+        date_query_for_log = f"{date_query} (defaulted to today)"
+    else:
+        date_query_for_log = date_query
+
+    target_date_obj: DateClass = target_date_dt.date()  # Extract the date part
+
+    logger.info(
+        f"Tool 'get_my_schedule': Parsed '{date_query_for_log}' to date: {target_date_obj} for doctor_id '{user_id}'"
+    )
+
+    async with tool_db_session() as db:
+        try:
+            appointments = await get_doctor_schedule_for_date(
+                db, doctor_id=user_id, target_date=target_date_obj
+            )
+
+            if not appointments:
+                return f"You have no appointments scheduled for {target_date_obj.strftime('%A, %B %d, %Y')}."
+
+            # Format the schedule into a readable string
+            # Times should be displayed in the doctor's local timezone
+            schedule_lines = [
+                f"Your schedule for {target_date_obj.strftime('%A, %B %d, %Y')}:"
+            ]
+            for appt in appointments:
+                starts_at_utc = appt["starts_at"].replace(
+                    tzinfo=TZ.utc
+                )  # Ensure it's UTC
+                ends_at_utc = appt["ends_at"].replace(tzinfo=TZ.utc)  # Ensure it's UTC
+
+                starts_at_local = starts_at_utc.astimezone(effective_user_tz)
+                ends_at_local = ends_at_utc.astimezone(effective_user_tz)
+
+                patient_info = f"Patient: {appt['patient_name']}"
+                notes_info = f"(Reason: {appt['notes']})" if appt["notes"] else ""
+
+                schedule_lines.append(
+                    f"- {starts_at_local.strftime('%I:%M %p')} - {ends_at_local.strftime('%I:%M %p')}: {patient_info} {notes_info}"
+                )
+
+            return "\n".join(schedule_lines)
+
+        except Exception as e:
+            logger.error(
+                f"Tool 'get_my_schedule': Error processing request for doctor_id '{user_id}', date '{target_date_obj}': {e}",
+                exc_info=True,
+            )
+            return "An unexpected error occurred while trying to retrieve your schedule. Please try again later."
+
