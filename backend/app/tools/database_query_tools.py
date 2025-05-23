@@ -501,3 +501,117 @@ async def get_my_schedule(
             )
             return "An unexpected error occurred while trying to retrieve your schedule. Please try again later."
 
+
+@tool("execute_doctor_day_cancellation_confirmed")
+async def execute_doctor_day_cancellation_confirmed(
+    date_query: Annotated[
+        str,
+        "The date for which to cancel all of the doctor's appointments (e.g., 'today', 'tomorrow', '2025-07-10'). This tool should ONLY be called AFTER the doctor has EXPLICITLY CONFIRMED the cancellation in a previous conversational turn.",
+    ],
+    user_id: Annotated[int, InjectedState("user_id")],  # Doctor's ID
+    user_tz: Annotated[Optional[str], InjectedState("user_tz")],
+) -> str:
+    """
+    Cancels ALL of the calling doctor's appointments for a specified date.
+    IMPORTANT: This tool performs the cancellation directly. The AI assistant MUST have ALREADY VERBALLY CONFIRMED with the doctor (e.g., "You have X appointments on {date}, are you sure you want to cancel all of them?") and received a 'yes' BEFORE calling this tool.
+    Do NOT call this tool without prior explicit confirmation from the doctor in the conversation.
+
+    Args:
+        date_query: The date (e.g., "today", "tomorrow", "YYYY-MM-DD") for which appointments are to be cancelled.
+        user_id: The ID of the doctor whose appointments are to be cancelled.
+        user_tz: The timezone of the user for correct date parsing.
+    """
+    logger.info(
+        f"Tool 'execute_doctor_day_cancellation_confirmed' invoked by doctor_id '{user_id}' for date_query: '{date_query}'"
+    )
+
+    effective_user_tz_str = user_tz or "UTC"
+    try:
+        effective_user_tz = ZoneInfo(effective_user_tz_str)
+    except Exception:
+        logger.warning(
+            f"Invalid user_tz '{user_tz}', defaulting to UTC for date parsing in cancellation tool."
+        )
+        effective_user_tz = ZoneInfo("UTC")
+        # effective_user_tz_str = "UTC" # Not strictly needed to re-assign
+
+    now_user_tz = datetime.now(effective_user_tz)
+
+    parsed_date_dt = dateparser.parse(
+        date_query,
+        settings={
+            "PREFER_DATES_FROM": "current_period",  # For "today", "tomorrow"
+            "RELATIVE_BASE": now_user_tz,
+            "TIMEZONE": effective_user_tz_str,
+        },
+    )
+
+    if not parsed_date_dt:
+        logger.warning(
+            f"Could not parse date_query for cancellation: '{date_query}' for doctor_id '{user_id}'."
+        )
+        return f"Sorry, I could not understand the date '{date_query}' for cancellation. Please specify a clear date."
+
+    target_date_obj: DateClass = parsed_date_dt.date()
+    logger.info(
+        f"Executing confirmed cancellation of all appointments for doctor_id {user_id} on date: {target_date_obj}"
+    )
+
+    async with tool_db_session() as db:
+        try:
+            # 1. Fetch appointments for this doctor on this date to get their IDs
+            appointments_on_schedule_details = await get_doctor_schedule_for_date(
+                db, doctor_id=user_id, target_date=target_date_obj
+            )
+
+            if not appointments_on_schedule_details:
+                return f"No appointments were found for you on {target_date_obj.strftime('%A, %B %d, %Y')} to cancel."
+
+            appointment_ids_to_cancel = [
+                appt["id"] for appt in appointments_on_schedule_details
+            ]
+            logger.info(
+                f"Found {len(appointment_ids_to_cancel)} appointments to cancel for doctor {user_id} on {target_date_obj}: IDs {appointment_ids_to_cancel}"
+            )
+
+            # 2. Proceed with cancellation for each appointment ID
+            cancelled_count = 0
+            failed_ids = []
+
+            for appt_id in appointment_ids_to_cancel:
+                try:
+                    # The delete_appointment CRUD function checks if the appointment belongs to the user (doctor in this case)
+                    # and has the correct role.
+                    success = await delete_appointment(
+                        db, appointment_id=appt_id, user_id=user_id, role="doctor"
+                    )
+                    if success:
+                        cancelled_count += 1
+                    else:
+                        logger.warning(
+                            f"delete_appointment returned False for appointment_id {appt_id} for doctor {user_id}."
+                        )
+                        failed_ids.append(appt_id)
+                except Exception as e_del:
+                    logger.error(
+                        f"Error deleting appointment_id {appt_id} for doctor {user_id}: {e_del}",
+                        exc_info=True,
+                    )
+                    failed_ids.append(appt_id)
+
+            formatted_date = target_date_obj.strftime("%A, %B %d, %Y")
+            response_message = f"Successfully cancelled {cancelled_count} appointment(s) for {formatted_date}."
+            if failed_ids:
+                response_message += f" Failed to cancel {len(failed_ids)} appointment(s) with IDs: {failed_ids} (they may have been already cancelled or an error occurred)."
+
+            logger.info(
+                f"Cancellation result for doctor {user_id} on {target_date_obj}: {response_message}"
+            )
+            return response_message
+
+        except Exception as e:
+            logger.error(
+                f"Tool 'execute_doctor_day_cancellation_confirmed': General error for doctor_id '{user_id}', date '{target_date_obj}': {e}",
+                exc_info=True,
+            )
+            return "An unexpected error occurred while trying to cancel your appointments. Please try again later."

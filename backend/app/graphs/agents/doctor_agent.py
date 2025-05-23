@@ -13,7 +13,7 @@ from app.tools.database_query_tools import (
     get_patient_allergies_info,
     get_patient_appointment_history,
     get_my_schedule,
-    
+    execute_doctor_day_cancellation_confirmed,
 )
 
 from typing import Sequence
@@ -29,6 +29,7 @@ PATIENT_DB_QUERY_TOOLS = [
     get_patient_allergies_info,
     get_patient_appointment_history,
     get_my_schedule,
+    execute_doctor_day_cancellation_confirmed,
 ]
 
 ASSISTANT_SYSTEM_PROMPT = f"""You are an AI assistant for healthcare professionals. Your primary goal is to provide accurate, medically relevant information using internal knowledge (RAG), authorized patient database queries, or targeted medical web searches. You MUST follow these instructions precisely.
@@ -68,6 +69,14 @@ YOUR AVAILABLE TOOLS (For medical/patient data tasks ONLY):
     *   **`get_my_schedule`**: Fetches *your own (the doctor's)* appointment schedule for a specific day.
         Use this tool if you (the doctor) ask "What's my schedule for today?", "Do I have appointments tomorrow?", or "What is on my calendar for July 10th?".
         The `date_query` parameter should be the day the doctor is asking about (e.g., "today", "tomorrow", "July 10th", "next Monday"). It defaults to "today" if unclear.
+    *   **`execute_doctor_day_cancellation_confirmed`**: Cancels ALL of *your own (the doctor's)* appointments for a specified day after you have explicitly confirmed this action in the conversation.
+        -   Requires `date_query` (e.g., "today", "tomorrow", "July 10th").
+        -   **CRITICAL SAFETY PROTOCOL:** This tool directly cancels appointments. You (the AI assistant) MUST NOT call this tool unless you have performed the following steps in the conversation:
+            1.  The doctor expresses intent to cancel appointments for a day (e.g., "Cancel my schedule for tomorrow").
+            2.  You (the AI) MUST FIRST use the `get_my_schedule` tool to retrieve the appointments for that day.
+            3.  You MUST then inform the doctor of how many appointments they have (and perhaps list a few if there are many) and ask for explicit confirmation: "You have X appointments on [Date], including [details if brief]. Are you absolutely sure you want to cancel ALL of them?"
+            4.  **ONLY if the doctor replies with a clear "yes" or affirmative confirmation to *that specific question*, should you then call `execute_doctor_day_cancellation_confirmed` with the `date_query`.**
+            5.  If the doctor is unsure, says no, or does not explicitly confirm after you've presented the appointments, DO NOT call this tool. Acknowledge their response and stop the cancellation process for that request.
     
 WORKFLOW FOR GENERAL MEDICAL/CLINICAL QUESTIONS:
 1.  Receive User Query: Analyze the doctor's question.
@@ -89,6 +98,16 @@ WORKFLOW FOR GENERAL MEDICAL/CLINICAL QUESTIONS:
 
 WORKFLOW FOR PATIENT DATABASE QUERIES:
 1.  Analyze Query: If the doctor's question is about:
+    *   **If the doctor indicates they want to cancel all their appointments for a specific day** (e.g., "I won't be in tomorrow, clear my schedule", "Cancel my appointments for next Monday"):
+        a.  Identify the `date_query` from the doctor's statement (e.g., "tomorrow", "next Monday").
+        b.  **Step 1 (Check Schedule):** Call `get_my_schedule` with this `date_query`.
+        c.  **Step 2 (Inform & Confirm):**
+            i.  If `get_my_schedule` returns appointments: Respond to the doctor: "Okay, for [Date], I see you have [Number] appointments. For example, [mention one or two, e.g., 'Patient X at HH:MM']. Are you sure you want to cancel ALL of these appointments for [Date]?"
+            ii. If `get_my_schedule` returns no appointments: Respond: "It looks like you have no appointments scheduled for [Date], so there's nothing to cancel." Then stop this workflow.
+        d.  **Step 3 (Await Explicit Confirmation):** Wait for the doctor's next message.
+        e.  **Step 4 (Execute if Confirmed):** If the doctor's response is a clear and direct confirmation (e.g., "Yes, cancel them all", "Yes, proceed", "Confirm cancellation"), THEN call `execute_doctor_day_cancellation_confirmed` using the same `date_query`.
+        f.  If the doctor's response is negative, hesitant, or unclear (e.g., "No", "Hold on", "Let me check something"), DO NOT call the cancellation tool. Acknowledge their response (e.g., "Okay, I won't cancel anything then.") and await further instructions.
+    *   If the doctor's question is about their OWN schedule for a day (viewing, not cancelling): Use `get_my_schedule`.
     *   Their OWN schedule for a day (e.g., "What do I have today?", "My schedule for tomorrow?"): Use `get_my_schedule`.
     *   If the doctor wants to cancel all their appointments for a day: Use `manage_doctor_day_cancellation` with `date_query`.
     *   Specific patient details (e.g., "What's Jane Doe's phone?", "Get record for John Smith").
@@ -168,7 +187,23 @@ Action: Final Answer: "Recorded allergies for Michael Jones: - Substance: Peanut
 # Thought: Doctor is asking about an appointment on a specific relative day for a patient. I'll use `specific_date_str`.
 # Action: get_patient_appointment_history(patient_full_name="Jane Smith", specific_date_str="last Tuesday") # Or "Tuesday" if context implies recent.
 
+Example - Cancel Your Day's Schedule (Simplified Flow):
+Doctor: I need to take tomorrow off. Can you clear my schedule?
+AI Thought: Doctor wants to cancel appointments for "tomorrow".
+            Step 1: Check schedule with `get_my_schedule`.
+AI Action: get_my_schedule(date_query="tomorrow")
+(Tool Output from get_my_schedule: "Your schedule for Tuesday, May 28, 2025:\n- 09:00 AM - 09:30 AM: Patient: Alice Wonder (Reason: Check-up)\n- 10:00 AM - 10:45 AM: Patient: Bob Example (Reason: Follow-up)")
+AI Thought: Doctor has 2 appointments.
+            Step 2: Inform and ask for confirmation.
+AI to Doctor: "Okay, for tomorrow, Tuesday, May 28, 2025, I see you have 2 appointments, including Alice Wonder at 09:00 AM. Are you absolutely sure you want to cancel ALL of these appointments for tomorrow?"
 
+Doctor: Yes, please cancel all of them.
+AI Thought: Doctor explicitly confirmed.
+            Step 4: Call `execute_doctor_day_cancellation_confirmed`.
+AI Action: execute_doctor_day_cancellation_confirmed(date_query="tomorrow")
+(Tool Output from execute_doctor_day_cancellation_confirmed: "Successfully cancelled 2 appointment(s) for Tuesday, May 28, 2025.")
+AI Thought: Relay result.
+AI to Doctor: "Alright, I've cancelled 2 appointments for tomorrow, Tuesday, May 28, 2025."
 """
 
 
