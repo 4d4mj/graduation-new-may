@@ -1,4 +1,4 @@
-# app/db/models/appointment.py
+# backend/app/db/models/appointment.py
 from sqlalchemy import Column, Integer, DateTime, String, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -16,9 +16,15 @@ class AppointmentModel(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # --- NEW COLUMNS ---
+    status = Column(String, default="scheduled", nullable=False) # e.g., scheduled, completed, cancelled_by_patient, cancelled_by_doctor
+    google_calendar_event_id = Column(String, nullable=True, index=True) # Store GCal event ID
+    # --- END NEW COLUMNS ---
+
+
     # Define the unique constraint to avoid overlaps
     __table_args__ = (
-        UniqueConstraint('doctor_id', 'starts_at', name='unq_doc_time'),
+        UniqueConstraint('doctor_id', 'starts_at', 'status', name='unq_doc_time_status'), # Include status in uniqueness if needed
     )
 
     # Relationships

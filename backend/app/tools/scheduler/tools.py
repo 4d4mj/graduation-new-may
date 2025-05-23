@@ -26,7 +26,8 @@ from app.db.crud.appointment import (
     get_available_slots_for_day,
     create_appointment,
     delete_appointment,
-    get_appointment
+    get_appointment,
+    update_appointment_gcal_id
 )
 from app.db.crud.doctor import find_doctors
 from app.db.session import tool_db_session
@@ -252,11 +253,10 @@ async def book_appointment(
     duration_minutes: int = 30,
     location: str = "Main Clinic",
     notes: str | None = None,
-    send_google_calendar_invite: bool = False, # NEW PARAMETER
-    # Optional overrides for Google Calendar details if LLM wants to be specific
+    send_google_calendar_invite: bool = False,
     gcal_summary_override: Optional[str] = None,
     gcal_description_override: Optional[str] = None,
-    gcal_event_time_override_hhmm: Optional[str] = None # For "TOMORROW HH:MM" if different from clinic time
+    gcal_event_time_override_hhmm: Optional[str] = None
 ) -> dict:
     """
     Create a clinic appointment. If send_google_calendar_invite is true, will also attempt
@@ -269,8 +269,8 @@ async def book_appointment(
     """
     logger.info(f"Tool 'book_appointment' called by user {patient_id} for doctor_id={doctor_id}, doctor_name={doctor_name} at {starts_at}. Send GCal: {send_google_calendar_invite}")
 
-    # --- 1. Clinic Appointment Booking Logic (mostly as before) ---
-    if not doctor_id and not doctor_name: # Basic validation
+    # --- Basic Validations ---
+    if not doctor_id and not doctor_name:
         return {"status": "error", "message": "Please provide either a doctor ID or a doctor name for the clinic appointment."}
     if not starts_at:
         return {"status": "error", "message": "Please provide a start time for the clinic appointment."}
@@ -278,155 +278,187 @@ async def book_appointment(
         logger.warning("Booking tool called without patient_id.")
         return {"status": "error", "message": "I couldn't identify you – please log in again."}
 
-    # Parse start_dt for clinic appointment (as before)
-    # ... (your existing start_dt parsing logic using dateparser and user_tz)
-    # For brevity, assuming start_dt_clinic (UTC datetime object) is correctly parsed here
-    
-    # Example placeholder for clinic start time parsing
+    # --- 1. Parse Clinic Appointment Time (ensure it's UTC) ---
     parsed_clinic_dt = dateparser.parse(starts_at, settings={
-        'TIMEZONE': user_tz or GCAL_DEFAULT_TIMEZONE, # Use user_tz or a default
-        'TO_TIMEZONE': 'UTC', # Ensure it's converted to UTC
+        'TIMEZONE': user_tz or GCAL_DEFAULT_TIMEZONE,
+        'TO_TIMEZONE': 'UTC',
         'RETURN_AS_TIMEZONE_AWARE': True,
         'PREFER_DATES_FROM': 'future'
     })
     if not parsed_clinic_dt:
         logger.warning(f"Invalid starts_at format for clinic appointment: {starts_at}")
         return {"status": "error", "message": "Invalid start time for clinic appointment."}
-    start_dt_clinic_utc = parsed_clinic_dt # This should be a timezone-aware datetime object in UTC
-
+    start_dt_clinic_utc = parsed_clinic_dt
     end_dt_clinic_utc = start_dt_clinic_utc + timedelta(minutes=duration_minutes)
-    
-    clinic_booking_result = {}
-    google_calendar_status = "Not attempted."
-    doctor_email_address = None # Will be populated if clinic booking succeeds
+
+    # --- 2. Clinic Appointment Booking in DB (Initial Step) ---
+    clinic_booking_result: Dict[str, Any] = {}
+    google_calendar_status: str = "Not attempted."
+    doctor_email_address: Optional[str] = None
+    db_appointment_object = None # <<<<< Will hold the created AppointmentModel instance
 
     async with tool_db_session() as db:
-        doctor = None # Fetch doctor as before
+        doctor_model_instance = None
         if doctor_id:
-            doctor = await find_doctors(db, doctor_id=doctor_id, return_single=True)
+            doctor_model_instance = await find_doctors(db, doctor_id=doctor_id, return_single=True)
         elif doctor_name:
-            cleaned_name = doctor_name # ... (your name cleaning logic) ...
-            doctor = await find_doctors(db, name=cleaned_name, return_single=True)
+            cleaned_name = doctor_name
+            if cleaned_name.lower().startswith("dr."):
+                cleaned_name = cleaned_name[3:].strip()
+            elif cleaned_name.lower().startswith("dr "):
+                cleaned_name = cleaned_name[3:].strip()
+            doctor_model_instance = await find_doctors(db, name=cleaned_name, return_single=True)
 
-        if not doctor:
+        if not doctor_model_instance:
             return {"status": "error", "message": f"Doctor not found for clinic appointment."}
-        
-        if not (doctor.user and hasattr(doctor.user, 'email')):
-             return {"status": "error", "message": f"Could not find email address for Dr. {doctor.first_name} {doctor.last_name}."}
-        doctor_email_address = doctor.user.email
 
+        if not (doctor_model_instance.user and hasattr(doctor_model_instance.user, 'email') and doctor_model_instance.user.email):
+             return {"status": "error", "message": f"Could not find a valid email address for Dr. {doctor_model_instance.first_name} {doctor_model_instance.last_name}."}
+        doctor_email_address = doctor_model_instance.user.email
 
-        appointment = await create_appointment(
-            db, patient_id, doctor.user_id, start_dt_clinic_utc, end_dt_clinic_utc, location, notes
+        # Call create_appointment from your CRUD, passing None for google_calendar_event_id initially
+        # It should return Union[AppointmentModel, Dict]
+        appointment_result_or_obj = await create_appointment(
+            db,
+            patient_id=patient_id,
+            doctor_id=doctor_model_instance.user_id,
+            starts_at=start_dt_clinic_utc,
+            ends_at=end_dt_clinic_utc,
+            location=location,
+            notes=notes,
+            google_calendar_event_id=None # Explicitly pass None here
         )
 
-        if isinstance(appointment, dict) and "status" in appointment: # Error from create_appointment
-            clinic_booking_result = appointment # e.g. {"status": "conflict", "message": "..."}
-        elif hasattr(appointment, 'id'): # Success
+        if isinstance(appointment_result_or_obj, dict) and "status" in appointment_result_or_obj:
+            clinic_booking_result = appointment_result_or_obj # Error from create_appointment
+        elif hasattr(appointment_result_or_obj, 'id'): # Successfully created AppointmentModel
+            db_appointment_object = appointment_result_or_obj # <<<<< STORE THE DB OBJECT
             clinic_booking_result = {
                 "status": "confirmed",
-                "id": appointment.id,
-                "doctor_id": doctor.user_id,
-                "doctor_name": f"Dr. {doctor.first_name} {doctor.last_name}",
+                "id": db_appointment_object.id,
+                "doctor_id": doctor_model_instance.user_id,
+                "doctor_name": f"Dr. {doctor_model_instance.first_name} {doctor_model_instance.last_name}",
                 "doctor_email": doctor_email_address,
-                "start_dt": format_datetime(start_dt_clinic_utc, 'long', locale='en', tzinfo=pytz.utc), # Ensure it's formatted as UTC
+                "start_dt": format_datetime(start_dt_clinic_utc, 'long', locale='en', tzinfo=pytz.utc),
                 "notes": notes
             }
-            logger.info(f"Clinic appointment ID {appointment.id} confirmed.")
+            logger.info(f"Clinic appointment ID {db_appointment_object.id} confirmed in DB.")
         else: # Unexpected result
             clinic_booking_result = {"status": "error", "message": "Unknown error during clinic booking."}
+            logger.error(f"Unexpected result from create_appointment: {appointment_result_or_obj}")
 
 
-    # --- 2. Google Calendar Invite Logic (if clinic booking was successful and requested) ---
-    if clinic_booking_result.get("status") == "confirmed" and send_google_calendar_invite:
-                logger.info(f"Attempting to send Google Calendar invite to doctor: {doctor_email_address}")
-                
-                gcal_service, gcal_error_msg = await asyncio.to_thread(_get_gcal_service_sync) # Run sync in thread
+    # --- 3. Google Calendar Invite Logic (if clinic booking was successful AND requested AND db_appointment_object exists) ---
+    if clinic_booking_result.get("status") == "confirmed" and send_google_calendar_invite and db_appointment_object: # <<<<< ADDED CHECK FOR db_appointment_object
+        logger.info(f"Attempting to send Google Calendar invite to doctor: {doctor_email_address}")
 
-                if not gcal_service:
-                    google_calendar_status = f"Failed to initialize Google Calendar service: {gcal_error_msg}"
-                else:
-                    try:
-                        # Determine event time for Google Calendar (TOMORROW)
-                        event_tz_str = user_tz or GCAL_DEFAULT_TIMEZONE # user_tz from InjectedState
-                        gcal_event_pytz = pytz.timezone(event_tz_str)
-                        
-                        # CORRECTED: Use datetime.now() directly, not datetime.datetime.now()
-                        now_gcal_local = datetime.now(gcal_event_pytz)
-                        # CORRECTED: Use timedelta() directly, not datetime.timedelta()
-                        tomorrow_gcal_local = now_gcal_local + timedelta(days=1)
+        gcal_service, gcal_error_msg = await asyncio.to_thread(_get_gcal_service_sync)
 
-                        event_hour, event_minute = 9, 0 # Default time for tomorrow's GCal event
-                        
-                        # Logic to determine summary and time for GCal event
-                        gcal_final_summary = gcal_summary_override
-                        final_event_time_str_hhmm = gcal_event_time_override_hhmm
+        if not gcal_service:
+            google_calendar_status = f"Failed to initialize Google Calendar service: {gcal_error_msg}"
+        else:
+            try:
+                # ... (Your existing logic for:
+                #       event_tz_str, gcal_event_pytz, now_gcal_local, tomorrow_gcal_local,
+                #       gcal_final_summary, final_event_time_str_hhmm, is_clinic_appt_tomorrow,
+                #       parsing event_hour/minute,
+                #       gcal_start_dt_local, gcal_duration_hours, gcal_end_dt_local,
+                #       gcal_start_rfc3339, gcal_end_rfc3339,
+                #       gcal_final_description, event_body
+                #      This all looks correct in your pasted code)
+                event_tz_str = user_tz or GCAL_DEFAULT_TIMEZONE
+                gcal_event_pytz = pytz.timezone(event_tz_str)
+                now_gcal_local = datetime.now(gcal_event_pytz)
+                tomorrow_gcal_local = now_gcal_local + timedelta(days=1)
+                gcal_final_summary = gcal_summary_override
+                final_event_time_str_hhmm = gcal_event_time_override_hhmm
+                is_clinic_appt_tomorrow = (start_dt_clinic_utc.astimezone(gcal_event_pytz).date() == tomorrow_gcal_local.date())
 
-                        # Check if clinic appointment is for tomorrow
-                        # start_dt_clinic_utc should be a timezone-aware datetime object (in UTC) from earlier in the function
-                        is_clinic_appt_tomorrow = (start_dt_clinic_utc.astimezone(gcal_event_pytz).date() == tomorrow_gcal_local.date())
+                if not gcal_final_summary:
+                    gcal_final_summary = f"Appointment: Patient & {clinic_booking_result['doctor_name']}"
+                    if not is_clinic_appt_tomorrow:
+                        clinic_appt_formatted_for_summary = start_dt_clinic_utc.astimezone(gcal_event_pytz).strftime('%b %d at %I:%M %p %Z')
+                        gcal_final_summary = f"REMINDER: {gcal_final_summary} (Actual appt: {clinic_appt_formatted_for_summary})"
+                if not final_event_time_str_hhmm:
+                    if is_clinic_appt_tomorrow:
+                        final_event_time_str_hhmm = start_dt_clinic_utc.astimezone(gcal_event_pytz).strftime('%H:%M')
+                    else:
+                        final_event_time_str_hhmm = "09:00"
+                try:
+                    event_hour, event_minute = map(int, final_event_time_str_hhmm.split(':'))
+                except ValueError:
+                    logger.warning(f"Invalid GCal event time format '{final_event_time_str_hhmm}', using 09:00.")
+                    event_hour, event_minute = 9, 0
+                gcal_start_dt_local = tomorrow_gcal_local.replace(hour=event_hour, minute=event_minute, second=0, microsecond=0)
+                gcal_duration_hours = duration_minutes / 60.0
+                gcal_end_dt_local = gcal_start_dt_local + timedelta(hours=gcal_duration_hours)
+                gcal_start_rfc3339 = gcal_start_dt_local.isoformat()
+                gcal_end_rfc3339 = gcal_end_dt_local.isoformat()
+                gcal_final_description = gcal_description_override or clinic_booking_result.get("notes") or gcal_final_summary
+                event_body = {
+                    'summary': gcal_final_summary,
+                    'description': gcal_final_description,
+                    'start': {'dateTime': gcal_start_rfc3339, 'timeZone': event_tz_str},
+                    'end': {'dateTime': gcal_end_rfc3339, 'timeZone': event_tz_str},
+                    'attendees': [{'email': doctor_email_address}],
+                    'reminders': {'useDefault': False, 'overrides': [{'method': 'popup', 'minutes': 30}]},
+                }
 
-                        if not gcal_final_summary:
-                            gcal_final_summary = f"Appointment: Patient & {clinic_booking_result['doctor_name']}"
-                            if not is_clinic_appt_tomorrow:
-                                clinic_appt_formatted_for_summary = start_dt_clinic_utc.astimezone(gcal_event_pytz).strftime('%b %d at %I:%M %p %Z')
-                                gcal_final_summary = f"REMINDER: {gcal_final_summary} (Actual appt: {clinic_appt_formatted_for_summary})"
+                def _sync_gcal_insert():
+                    return gcal_service.events().insert(calendarId='primary', body=event_body, sendNotifications=True).execute()
 
-                        if not final_event_time_str_hhmm: # If LLM didn't specify a GCal time
-                            if is_clinic_appt_tomorrow:
-                                final_event_time_str_hhmm = start_dt_clinic_utc.astimezone(gcal_event_pytz).strftime('%H:%M')
-                            else: # Clinic appt not tomorrow, use default 9 AM for reminder
-                                final_event_time_str_hhmm = "09:00"
-                        
-                        try:
-                            event_hour, event_minute = map(int, final_event_time_str_hhmm.split(':'))
-                        except ValueError:
-                            logger.warning(f"Invalid GCal event time format '{final_event_time_str_hhmm}', using 09:00.")
-                            event_hour, event_minute = 9, 0
+                created_event = await asyncio.to_thread(_sync_gcal_insert)
+                gcal_event_id_from_api = created_event.get('id') # <<<< GET THE GCAL EVENT ID
 
-                        gcal_start_dt_local = tomorrow_gcal_local.replace(hour=event_hour, minute=event_minute, second=0, microsecond=0)
-                        # Use clinic appointment duration for GCal event
-                        gcal_duration_hours = duration_minutes / 60.0 
-                        # CORRECTED: Use timedelta() directly
-                        gcal_end_dt_local = gcal_start_dt_local + timedelta(hours=gcal_duration_hours)
+                if gcal_event_id_from_api:
+                    google_calendar_status = f"Google Calendar invite sent to {doctor_email_address} for {gcal_final_summary}. Link: {created_event.get('htmlLink')}"
+                    logger.info(google_calendar_status)
 
-                        gcal_start_rfc3339 = gcal_start_dt_local.isoformat()
-                        gcal_end_rfc3339 = gcal_end_dt_local.isoformat()
+                    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                    # ++++ THIS IS THE BLOCK YOU NEED TO ADD/ENSURE IS CORRECT +++++++++++++
+                    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                    # Now, update the database record with this gcal_event_id_from_api
+                    async with tool_db_session() as db_for_gcal_update:
+                        gcal_id_updated_in_db = await update_appointment_gcal_id(
+                            db_for_gcal_update,
+                            db_appointment_object.id, # Use the ID from the appointment object created earlier
+                            gcal_event_id_from_api
+                        )
+                        if gcal_id_updated_in_db:
+                            logger.info(f"Successfully stored GCal event ID {gcal_event_id_from_api} for DB appointment {db_appointment_object.id}")
+                        else:
+                            logger.warning(f"Failed to store GCal event ID {gcal_event_id_from_api} for DB appointment {db_appointment_object.id}")
+                            google_calendar_status += " (Note: GCal ID failed to save to DB)."
+                    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-                        gcal_final_description = gcal_description_override or clinic_booking_result.get("notes") or gcal_final_summary
+                else: # if no gcal_event_id_from_api
+                    google_calendar_status = f"Google Calendar invite sent to {doctor_email_address} for {gcal_final_summary}, but no event ID was returned by Google."
+                    logger.warning(google_calendar_status)
 
-                        event_body = {
-                            'summary': gcal_final_summary,
-                            'description': gcal_final_description,
-                            'start': {'dateTime': gcal_start_rfc3339, 'timeZone': event_tz_str},
-                            'end': {'dateTime': gcal_end_rfc3339, 'timeZone': event_tz_str},
-                            'attendees': [{'email': doctor_email_address}], # Invite the doctor
-                            'reminders': {'useDefault': False, 'overrides': [{'method': 'popup', 'minutes': 30}]},
-                        }
-                        
-                        def _sync_gcal_insert(): # Inner sync function for asyncio.to_thread
-                            # Ensure gcal_service is in the closure or passed
-                            return gcal_service.events().insert(calendarId='primary', body=event_body, sendNotifications=True).execute()
-                        
-                        created_event = await asyncio.to_thread(_sync_gcal_insert)
-                        
-                        google_calendar_status = f"Google Calendar invite sent to {doctor_email_address} for {gcal_final_summary}. Link: {created_event.get('htmlLink')}"
-                        logger.info(google_calendar_status)
+            except HttpError as api_error:
+                # ... (your existing HttpError handling, looks correct)
+                google_calendar_status = f"Google Calendar API error: {api_error.resp.status if api_error.resp else 'Unknown'} - Failed to create event."
+                error_content = api_error.content.decode('utf-8') if hasattr(api_error, 'content') and isinstance(api_error.content, bytes) else str(api_error.content)
+                logger.error(f"{google_calendar_status} Details: {error_content}", exc_info=True)
+            except Exception as e_gcal:
+                # ... (your existing general GCal Exception handling, looks correct)
+                google_calendar_status = f"Unexpected error during Google Calendar scheduling: {type(e_gcal).__name__} - {e_gcal}"
+                logger.error(google_calendar_status, exc_info=True)
+    else: # Reasons for not attempting GCal invite
+        if clinic_booking_result.get("status") != "confirmed":
+            logger.info("Skipping Google Calendar invite because clinic booking was not successful.")
+        elif not send_google_calendar_invite:
+            logger.info("Skipping Google Calendar invite because send_google_calendar_invite is false.")
+        elif not db_appointment_object:
+            logger.info("Skipping Google Calendar invite because db_appointment_object is None (unexpected after confirmed booking).")
 
-                    except HttpError as api_error:
-                        google_calendar_status = f"Google Calendar API error: {api_error.resp.status if api_error.resp else 'Unknown'} - Failed to create event."
-                        # Log the full content for debugging API errors
-                        error_content = api_error.content.decode('utf-8') if hasattr(api_error, 'content') and isinstance(api_error.content, bytes) else str(api_error.content)
-                        logger.error(f"{google_calendar_status} Details: {error_content}", exc_info=True) # Added exc_info for full traceback
-                    except Exception as e_gcal:
-                        google_calendar_status = f"Unexpected error during Google Calendar scheduling: {type(e_gcal).__name__} - {e_gcal}" # More specific error type
-                        logger.error(google_calendar_status, exc_info=True)
-    
-    # --- 3. Consolidate and Return ---
-    final_result = {**clinic_booking_result} # Start with clinic booking status
+
+    # --- 4. Consolidate and Return ---
+    final_result = {**clinic_booking_result}
     final_result["google_calendar_invite_status"] = google_calendar_status
+    logger.info(f"book_appointment tool final result: {final_result}")
     return final_result
-
 
 @tool("cancel_appointment")
 async def cancel_appointment(
