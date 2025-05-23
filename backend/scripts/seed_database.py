@@ -26,11 +26,12 @@ from app.db.models import (
     PatientModel,
     AppointmentModel,
     AllergyModel,
+    DoctorSalaryModel,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text, select
-
+from sqlalchemy import text, select, Numeric
+import decimal
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -407,6 +408,7 @@ def random_address(i: int) -> str:
 
 async def clear_data(db: AsyncSession):
     logger.warning("Clearing existing data from tables...")
+    await db.execute(text("DELETE FROM doctor_salaries;"))
     await db.execute(text("DELETE FROM allergies;"))
     await db.execute(text("DELETE FROM appointments;"))
     await db.execute(text("DELETE FROM patients;"))
@@ -481,6 +483,80 @@ async def seed_all_data(db: AsyncSession):
     except Exception as e:
         await db.rollback()
         logger.error(f"Unexpected error committing doctors: {e}", exc_info=True)
+
+    # Seed doctor salaries
+    if created_doctors_user_ids:  # Ensure we have doctor IDs to work with
+        logger.info(f"Seeding salaries for {len(created_doctors_user_ids)} doctors...")
+        for doc_user_id in created_doctors_user_ids:
+            # Create some varied, fictional data
+            base_salary = decimal.Decimal(
+                random.randint(150, 300) * 1000
+            )  # e.g., 150,000 to 300,000
+
+            has_bonus = random.choice(
+                [True, False, False]
+            )  # Make bonuses less frequent
+            bonus_amount = (
+                decimal.Decimal(random.randint(5, 20) * 1000) if has_bonus else None
+            )
+            bonus_date = (
+                (datetime.now(TZ.utc) - timedelta(days=random.randint(30, 365))).date()
+                if has_bonus
+                else None
+            )
+            bonus_reasons = [
+                "Exceeded Q4 targets",
+                "Exceptional patient feedback",
+                "Leadership on new initiative",
+                "Annual performance bonus",
+            ]
+            bonus_reason = random.choice(bonus_reasons) if has_bonus else None
+
+            has_raise = random.choice(
+                [True, True, False]
+            )  # Make raises more frequent than bonuses
+            raise_percentage = (
+                decimal.Decimal(random.uniform(2.0, 6.0)).quantize(
+                    decimal.Decimal("0.01")
+                )
+                if has_raise
+                else None
+            )
+            raise_date = (
+                (datetime.now(TZ.utc) - timedelta(days=random.randint(60, 500))).date()
+                if has_raise
+                else None
+            )
+            raise_reasons = [
+                "Annual cost-of-living adjustment",
+                "Performance review increase",
+                "Market rate adjustment",
+                "Expanded responsibilities",
+            ]
+            raise_reason = random.choice(raise_reasons) if has_raise else None
+
+            review_periods = ["Q1", "Q2", "Q3", "Q4"]
+            next_review = f"{random.choice(review_periods)} {datetime.now(TZ.utc).year + random.choice([0, 1])}"
+
+            salary_entry = DoctorSalaryModel(
+                doctor_user_id=doc_user_id,
+                base_salary_annual=base_salary,
+                last_bonus_amount=bonus_amount,
+                last_bonus_date=bonus_date,
+                last_bonus_reason=bonus_reason,
+                last_raise_percentage=raise_percentage,
+                last_raise_date=raise_date,
+                last_raise_reason=raise_reason,
+                next_review_period=next_review,
+            )
+            db.add(salary_entry)
+            logger.info(
+                f"  Created salary entry for doctor_user_id {doc_user_id}: Salary ${base_salary}"
+            )
+        await db.commit()
+        logger.info("Doctor salaries seeded.")
+    else:
+        logger.warning("No doctor IDs available to seed salaries.")
 
     # 2. Seed Patients
     logger.info(f"Seeding {NUM_TOTAL_PATIENTS} patients...")

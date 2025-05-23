@@ -21,6 +21,8 @@ from app.db.crud.allergy import get_allergies_for_patient
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.crud.salary import get_doctor_financial_summary_by_user_id
+
 from datetime import (
     datetime,
     timedelta,
@@ -29,6 +31,7 @@ from datetime import (
 )  # Alias date
 from zoneinfo import ZoneInfo  # Preferred for IANA timezones
 import dateparser
+import decimal
 
 logger = logging.getLogger(__name__)
 
@@ -615,3 +618,83 @@ async def execute_doctor_day_cancellation_confirmed(
                 exc_info=True,
             )
             return "An unexpected error occurred while trying to cancel your appointments. Please try again later."
+
+
+@tool("get_my_financial_summary")
+async def get_my_financial_summary(
+    user_id: Annotated[int, InjectedState("user_id")],
+) -> str:
+    """
+    Retrieves a summary of the calling doctor's financial information from the clinic's records,
+    including salary, recent bonuses, and raises.
+    Use this tool when the doctor inquires about their salary, compensation, recent bonuses, or raises.
+    """
+    logger.info(
+        f"Tool 'get_my_financial_summary' invoked by doctor_id '{user_id}' - using DB"
+    )
+
+    async with tool_db_session() as db:
+        financial_summary_model = await get_doctor_financial_summary_by_user_id(
+            db, doctor_user_id=user_id
+        )
+
+    if not financial_summary_model:
+        return "I'm sorry, but I could not find financial information for your profile in our records. For official details, please consult the HR department."
+
+    # Formatting the response string
+    doctor_name = "doctor"  # Default
+    if financial_summary_model.user and financial_summary_model.user.doctor_profile:
+        doctor_name = f"Dr. {financial_summary_model.user.doctor_profile.first_name} {financial_summary_model.user.doctor_profile.last_name}"
+
+    response_lines = [
+        f"Here's a summary of the financial information for {doctor_name} from our records:"
+    ]
+
+    # Helper to format currency
+    def format_currency(value: Optional[decimal.Decimal]) -> str:
+        if value is None:
+            return "N/A"
+        return f"${value:,.2f}"  # Format with commas and 2 decimal places
+
+    response_lines.append(
+        f"- Annual Base Salary: {format_currency(financial_summary_model.base_salary_annual)}"
+    )
+
+    if (
+        financial_summary_model.last_bonus_amount
+        and financial_summary_model.last_bonus_date
+    ):
+        bonus_reason = financial_summary_model.last_bonus_reason or "Not specified"
+        response_lines.append(
+            f"- Last Bonus: {format_currency(financial_summary_model.last_bonus_amount)} on {financial_summary_model.last_bonus_date.strftime('%Y-%m-%d')}. "
+            f"Reason: {bonus_reason}"
+        )
+    else:
+        response_lines.append(
+            "- Last Bonus: No recent bonus information found in records."
+        )
+
+    if (
+        financial_summary_model.last_raise_percentage
+        and financial_summary_model.last_raise_date
+    ):
+        raise_reason = financial_summary_model.last_raise_reason or "Not specified"
+        response_lines.append(
+            f"- Last Raise: {financial_summary_model.last_raise_percentage:.2f}% on {financial_summary_model.last_raise_date.strftime('%Y-%m-%d')}. "
+            f"Reason: {raise_reason}"
+        )
+    else:
+        response_lines.append(
+            "- Last Raise: No recent raise information found in records."
+        )
+
+    if financial_summary_model.next_review_period:
+        response_lines.append(
+            f"- Next Performance Review Period: {financial_summary_model.next_review_period}"
+        )
+
+    response_lines.append(
+        "\nPlease note: For official and complete details, please always refer to the HR department or your employment contract."
+    )
+
+    return "\n".join(response_lines)
