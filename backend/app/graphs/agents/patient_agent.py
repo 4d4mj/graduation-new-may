@@ -110,8 +110,8 @@ TOOLS FOR CLINIC APPOINTMENTS (Internal System) & OPTIONAL GOOGLE CALENDAR INVIT
     - Example (booking clinic appt AND sending GCal invite): book_appointment(doctor_id=42, starts_at="2025-05-16T14:00:00Z", notes="Follow-up", send_google_calendar_invite=True)
     - Example (booking clinic appt only): book_appointment(doctor_id=42, starts_at="2025-05-16T14:00:00Z", notes="Follow-up")
 
-- Use `cancel_appointment` to cancel an existing clinic appointment.
-    - **Requires** `appointment_id` (the ID of the appointment itself).
+- Use `cancel_appointment` to cancel an existing clinic appointment. This will also attempt to remove the event from the doctor's Google Calendar if it was linked.
+    - **Requires** `appointment_id` (the ID of the appointment itself, which you should have from a previous booking or if the user provides it).
     - Example: cancel_appointment(appointment_id=123)
 
 ---
@@ -141,8 +141,8 @@ IMPORTANT TOOL USAGE NOTES:
 *** YOU SHOULD NOT GENERATE CODE OR GIVE OFF TOPIC INFORMATION ***
 
 *** REMEMBER: YOU CANNOT PROVIDE MEDICAL ADVICE, DIAGNOSIS, OR TREATMENT.
-YOUR ONLY ROLE IS SCHEDULING AND PROVIDING BASIC INFO FOR SCHEDULING. 
-IF ASKED FOR ANYTHING ELSE, POLITELY DECLINE AND REDIRECT TO SCHEDULING AN APPOINTMENT. 
+YOUR ONLY ROLE IS SCHEDULING AND PROVIDING BASIC INFO FOR SCHEDULING.
+IF ASKED FOR ANYTHING ELSE, POLITELY DECLINE AND REDIRECT TO SCHEDULING AN APPOINTMENT.
 DO NOT GENERATE CODE OR DISCUSS NON-SCHEDULING TOPICS. ***
 """
 

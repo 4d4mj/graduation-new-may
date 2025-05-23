@@ -81,6 +81,37 @@ def _get_gcal_service_sync():
         logger.error(f'Google Calendar: Unexpected error building service: {e}', exc_info=True)
         return None, f"Unexpected error building Google Calendar service: {e}"
 
+async def _delete_gcal_event_if_exists_scheduler(event_id: str, calendar_id: str = 'primary') -> tuple[bool, str]:
+    """
+    Helper to delete a single GCal event.
+    Returns (success_bool, message_str).
+    """
+    if not event_id:
+        return True, "No GCal event ID provided for deletion."
+
+    logger.info(f"Scheduler GCal Helper: Attempting to get GCal service for deleting event_id: {event_id}")
+    service, error_msg = await asyncio.to_thread(_get_gcal_service_sync) # Uses the one defined/imported in this file
+    if not service:
+        logger.error(f"Scheduler GCal Helper: Failed to get Google Calendar service: {error_msg}")
+        return False, f"Failed to connect to Google Calendar: {error_msg}"
+
+    try:
+        logger.info(f"Scheduler GCal Helper: Attempting to delete Google Calendar event: {event_id} from calendar: {calendar_id}")
+        await asyncio.to_thread(
+            service.events().delete(calendarId=calendar_id, eventId=event_id, sendUpdates='all').execute
+        )
+        logger.info(f"Scheduler GCal Helper: Successfully deleted Google Calendar event: {event_id}")
+        return True, f"Google Calendar event {event_id} successfully deleted."
+    except HttpError as e:
+        if e.resp.status == 404:
+            logger.warning(f"Scheduler GCal Helper: Google Calendar event {event_id} not found for deletion (404).")
+            return True, f"Google Calendar event {event_id} not found (might be already deleted)."
+        logger.error(f"Scheduler GCal Helper: HttpError deleting event {event_id}: {e.resp.status} - {e.content}", exc_info=True)
+        return False, f"Google Calendar API error deleting event {event_id}: {e.resp.status}"
+    except Exception as e:
+        logger.error(f"Scheduler GCal Helper: Unexpected error deleting event {event_id}: {e}", exc_info=True)
+        return False, f"Unexpected error deleting Google Calendar event {event_id}: {str(e)}"
+
 # helper to parse a day string into a date in user timezone or default to tomorrow
 def _parse_day(text: str | None, user_tz: str | None) -> date:
     base = datetime.now(ZoneInfo(user_tz)) if user_tz else datetime.utcnow()
@@ -464,36 +495,83 @@ async def book_appointment(
 async def cancel_appointment(
     appointment_id: int,
     patient_id: Annotated[int, InjectedState("user_id")],
+    # user_tz is not strictly needed here unless GCal interactions require it,
+    # but _delete_gcal_event_if_exists_scheduler doesn't use it.
 ) -> dict:
-    """Cancel an existing appointment owned by the current user."""
-    logger.info(f"Tool 'cancel_appointment' called by user {patient_id} for appointment ID {appointment_id}")
-    if not patient_id:
-        logger.warning("Cancel tool called without patient_id.")
+    """
+    Cancel an existing appointment owned by the current user.
+    This will delete the appointment from the database and attempt to delete
+    any associated Google Calendar event.
+    """
+    logger.info(f"Tool 'cancel_appointment' called by user {patient_id} for appointment_id={appointment_id}")
+    if not patient_id: # Should be caught by auth middleware, but good check
+        logger.warning("Cancel tool called without patient_id (should be injected).")
         return {"status": "error", "message": "I couldn't identify you – please log in again."}
+
+    gcal_event_id_to_delete: Optional[str] = None
+    gcal_cancellation_status_msg: str = "Google Calendar event not applicable or not processed."
 
     try:
         async with tool_db_session() as db:
-            # First verify the appointment exists and belongs to this patient
+            # 1. Verify appointment existence and ownership, and get GCal ID
+            appointment_to_cancel: Optional[AppointmentModel] = None
             try:
-                appointment = await get_appointment(db, appointment_id, patient_id, "patient")
-            except Exception as e:
-                logger.warning(f"Failed to get appointment {appointment_id} for patient {patient_id}: {e}")
+                # get_appointment CRUD should return the AppointmentModel which includes google_calendar_event_id
+                appointment_to_cancel = await get_appointment(db, appointment_id, patient_id, "patient")
+                if appointment_to_cancel and hasattr(appointment_to_cancel, 'google_calendar_event_id'):
+                    gcal_event_id_to_delete = appointment_to_cancel.google_calendar_event_id
+                    logger.info(f"Tool: Found GCal Event ID '{gcal_event_id_to_delete}' for appointment_id={appointment_id} to be cancelled.")
+                elif appointment_to_cancel:
+                    logger.info(f"Tool: No GCal Event ID found for appointment_id={appointment_id}.")
+                # If get_appointment raises HTTPException, it will be caught by the outer try-except
+            except HTTPException as http_exc: # Catch specific FastAPI HTTPException from get_appointment
+                logger.warning(f"Tool: get_appointment failed for appt_id={appointment_id}, user_id={patient_id}. Detail: {http_exc.detail}")
+                return {"status": "error", "message": http_exc.detail} # Relay message from get_appointment
+            except Exception as e_get: # Catch other unexpected errors from get_appointment
+                logger.error(f"Tool: Unexpected error fetching appointment {appointment_id} for patient {patient_id}: {e_get}", exc_info=True)
+                return {"status": "error", "message": "An error occurred while trying to find your appointment."}
+
+            # If appointment_to_cancel is None here, get_appointment raised an error handled above, or it just wasn't found
+            if not appointment_to_cancel:
+                 # This case should ideally be covered by get_appointment raising HTTPException for not found
+                logger.warning(f"Tool: Appointment {appointment_id} not found or not accessible by user {patient_id} after initial check.")
                 return {"status": "error", "message": "That appointment doesn't exist or doesn't belong to you."}
 
-            # Now delete it
-            logger.debug(f"Attempting to delete appointment {appointment_id} for user {patient_id}")
-            result = await delete_appointment(db, appointment_id, patient_id, "patient")
 
-            if result:
-                logger.info(f"Successfully cancelled appointment {appointment_id}")
-                return {"status": "cancelled", "message": f"Appointment #{appointment_id} has been cancelled successfully."}
+            # 2. Delete from Database
+            # delete_appointment CRUD performs a hard delete
+            logger.debug(f"Tool: Attempting to hard delete appointment_id={appointment_id} from DB for user_id={patient_id}")
+            db_deleted_successfully = await delete_appointment(db, appointment_id, patient_id, "patient")
+
+            if db_deleted_successfully:
+                logger.info(f"Tool: Successfully deleted appointment_id={appointment_id} from database.")
+
+                # 3. Attempt to Delete from Google Calendar if GCal ID exists
+                if gcal_event_id_to_delete:
+                    logger.info(f"Tool: Proceeding to delete GCal event_id='{gcal_event_id_to_delete}'.")
+                    gcal_success, gcal_msg = await _delete_gcal_event_if_exists_scheduler(gcal_event_id_to_delete)
+                    gcal_cancellation_status_msg = gcal_msg # Store the message from the helper
+                    if gcal_success:
+                        logger.info(f"Tool: GCal processing for event_id='{gcal_event_id_to_delete}' successful.")
+                    else:
+                        logger.warning(f"Tool: GCal processing for event_id='{gcal_event_id_to_delete}' had issues: {gcal_msg}")
+                else:
+                    gcal_cancellation_status_msg = "No Google Calendar event was linked to this appointment."
+                    logger.info(f"Tool: No GCal event ID to delete for appointment_id={appointment_id}.")
+
+                return {
+                    "status": "cancelled",
+                    "message": f"Appointment #{appointment_id} has been successfully cancelled from the schedule. {gcal_cancellation_status_msg}"
+                }
             else:
-                logger.warning(f"Failed to cancel appointment {appointment_id}")
-                return {"status": "error", "message": "Sorry – I couldn't cancel that appointment."}
+                # This case implies delete_appointment returned False, which means the get_appointment check
+                # might have passed but the delete itself failed for some reason (e.g., row gone between select and delete - rare).
+                logger.warning(f"Tool: Failed to delete appointment_id={appointment_id} from database, though it was initially found.")
+                return {"status": "error", "message": "Sorry – there was an issue cancelling that appointment from the database."}
 
-    except Exception as e:
-        logger.error(f"Error executing cancel_appointment tool: {e}", exc_info=True)
-        return {"status": "error", "message": "I encountered an error while trying to cancel the appointment. Please try again later."}
+    except Exception as e: # Catch-all for unexpected errors in the tool's own logic
+        logger.error(f"Tool 'cancel_appointment': Unexpected error for appointment_id={appointment_id}, user_id={patient_id}: {e}", exc_info=True)
+        return {"status": "error", "message": "I encountered an unexpected error while trying to cancel the appointment. Please try again later."}
 
 
 @tool("propose_booking")
