@@ -11,7 +11,8 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '476e3d2a4df6'
-down_revision = '954d6434947c' # Make sure this 'Revises' ID is correct for your history
+#down_revision = '954d6434947c' # Make sure this 'Revises' ID is correct for your history
+down_revision = 'b926f459c776' # <<<< CHANGE THIS
 branch_labels = None
 depends_on = None
 
