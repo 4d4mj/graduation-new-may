@@ -12,7 +12,7 @@ from langgraph.types import Command
 import json
 import random  # Keep for /test endpoint
 from app.schemas.chat import ChatMessage
-
+from datetime import datetime, timezone
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)  # Corrected logger name
 
@@ -85,6 +85,8 @@ async def chat(
             cmd = Command(resume=payload.resume_value)
             final_state = await graph.ainvoke(cmd, config=config)
         else:
+            current_utc_time = datetime.now(timezone.utc)
+            logger.info(f"CHAT ROUTE: Setting initial graph 'now' to: {current_utc_time.isoformat()}")
             # Normal invocation
             graph_input = {
                 "messages": [HumanMessage(content=payload.message)],
@@ -94,6 +96,7 @@ async def chat(
                 "user_id": user_id,
                 "role": role,
                 "user_tz": payload.user_tz,
+                "now": current_utc_time
             }
             logger.debug(
                 f"Invoking graph for role '{role}' with input keys: {list(graph_input.keys())} and config: {config}"
