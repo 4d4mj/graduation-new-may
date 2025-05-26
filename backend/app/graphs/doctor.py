@@ -21,7 +21,10 @@ def route_after_guard_in(state: dict) -> Literal["agent", "__end__"]:
         # Input is safe, proceed to the agent
         logger.info("Input guardrail passed, routing to agent.")
         return "agent"
+
+
 # --- END ADDITION ---
+
 
 def route_after_agent(state: dict) -> str:
     """Routes based on the agent's output."""
@@ -32,8 +35,10 @@ def route_after_agent(state: dict) -> str:
         return "tools"
     return "guard_out"
 
+
 # Define direct response tools that should bypass agent reformulation
 DIRECT_TO_UI = {"list_free_slots", "list_patients"}
+
 
 # New node to process tool outputs and update the graph structure to handle direct tool responses, ensuring raw outputs are returned when necessary.
 def process_tool_output_node(state: DoctorState):
@@ -50,12 +55,14 @@ def process_tool_output_node(state: DoctorState):
             state.raw_tool_output = tool_content  # Store raw output
             state.is_direct_tool_response = True
 
+
 # Routing function after processing tool output
 def route_after_tool_processing(state: DoctorState) -> str:
     """Decides where to go after processing the tool's output."""
     if state.is_direct_tool_response:
         return "structured_output"  # End graph execution, raw tool output is ready
     return "agent"  # Continue processing with agent
+
 
 # Add structured output node
 def structured_output(state: dict) -> dict:
@@ -70,12 +77,16 @@ def structured_output(state: dict) -> dict:
 
     # Parse the tool content (most tools already return JSON)
     import json
+
     if isinstance(tool_content, str):
         try:
             structured_output = json.loads(tool_content)
         except json.JSONDecodeError:
             # Not valid JSON, use as is
-            structured_output = {"type": "error", "message": "Error processing tool response"}
+            structured_output = {
+                "type": "error",
+                "message": "Error processing tool response",
+            }
             logger.error(f"Tool {tool_name} returned non-JSON content: {tool_content}")
     else:
         # Already a dict/object
@@ -85,9 +96,12 @@ def structured_output(state: dict) -> dict:
     state["final_output"] = structured_output
     state["agent_name"] = structured_output.get("agent", "Doctor")
 
-    logger.info(f"Bypassing agent reformulation for {tool_name} with structured output type: {structured_output.get('type', 'unknown')}")
+    logger.info(
+        f"Bypassing agent reformulation for {tool_name} with structured output type: {structured_output.get('type', 'unknown')}"
+    )
 
     return state
+
 
 def create_doctor_graph() -> StateGraph:
     """
@@ -108,7 +122,9 @@ def create_doctor_graph() -> StateGraph:
     # Add nodes
     g.add_node("guard_in", guard_in)
     g.add_node("agent", doctor_agent.medical_agent.ainvoke)
-    g.add_node("tools", lambda state: state)  # LangGraph will fill this with tool execution
+    g.add_node(
+        "tools", lambda state: state
+    )  # LangGraph will fill this with tool execution
     g.add_node("process_tool_output", process_tool_output_node)
     g.add_node("guard_out", guard_out)
     g.add_node("structured_output", structured_output)  # Direct structured output node
@@ -121,9 +137,9 @@ def create_doctor_graph() -> StateGraph:
         "guard_in",
         route_after_guard_in,
         {
-            "agent": "agent",       # If route_after_guard_in returns "agent"
-            "__end__": END,         # If route_after_guard_in returns "__end__"
-        }
+            "agent": "agent",  # If route_after_guard_in returns "agent"
+            "__end__": END,  # If route_after_guard_in returns "__end__"
+        },
     )
     # --- END REPLACEMENT ---
 
@@ -146,7 +162,7 @@ def create_doctor_graph() -> StateGraph:
         route_after_tool_processing,
         {
             "structured_output": "structured_output",  # Direct structured output to frontend
-            "agent": "agent",                          # Continue processing with agent
+            "agent": "agent",  # Continue processing with agent
         },
     )
 

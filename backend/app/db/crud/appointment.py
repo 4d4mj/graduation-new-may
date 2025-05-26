@@ -3,7 +3,8 @@ import logging
 from datetime import datetime, date, time, timedelta, timezone
 from typing import List, Optional, Dict, Any,Union
 
-from sqlalchemy import select, insert, delete, and_, or_, update
+from sqlalchemy import select, insert, delete, and_, or_, update, Date, cast
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from fastapi import HTTPException
@@ -15,6 +16,7 @@ from app.db.models.user import UserModel
 
 logger = logging.getLogger(__name__)
 
+
 async def create_appointment(
     db: AsyncSession,
     patient_id: int,
@@ -23,8 +25,8 @@ async def create_appointment(
     ends_at: datetime,   # Should be UTC datetime
     location: str,
     notes: Optional[str] = None,
-    google_calendar_event_id: Optional[str] = None # << NEW PARAMETER
-) -> Union[AppointmentModel, Dict[str, Any]]: # Return type can be the model or an error dict
+    google_calendar_event_id: Optional[str] = None
+) -> Union[AppointmentModel, Dict[str, Any]]:
     """
     Create a new appointment in the database.
 
@@ -48,15 +50,13 @@ async def create_appointment(
     """
     logger.info(
         f"CRUD: Attempting to create appointment for patient_id={patient_id} with doctor_id={doctor_id} "
-        f"from {starts_at} to {ends_at}. GCal ID: {google_calendar_event_id}"
-    )
+        f"from {starts_at} to {ends_at}. GCal ID: {google_calendar_event_id}")
     try:
         # 1. Validate Doctor
         doctor_user = await get_user(db, doctor_id) # Assuming get_user fetches UserModel
         if not doctor_user or doctor_user.role != "doctor":
             logger.warning(f"CRUD: Doctor validation failed for doctor_id={doctor_id}. User role: {doctor_user.role if doctor_user else 'None'}")
             return {"status": "error", "message": "Doctor not found or the specified user is not a doctor."}
-
         # 2. Check for Scheduling Conflicts
         # Only check against other 'scheduled' appointments for the same doctor at the overlapping time.
         conflict_stmt = select(AppointmentModel).where(
@@ -76,7 +76,6 @@ async def create_appointment(
                 f"Conflicts with appointment_id={conflicting_appointment.id}"
             )
             return {"status": "conflict", "message": "This time slot is already booked with a scheduled appointment."}
-
         # 3. Create New Appointment Instance
         new_appointment_data = {
             "patient_id": patient_id,
@@ -124,7 +123,7 @@ async def get_appointments(
     doctor_id: Optional[int] = None,
     patient_id: Optional[int] = None,
     date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None
+    date_to: Optional[datetime] = None,
 ) -> List[Dict[str, Any]]:
     """
     Get appointments based on filters with role-based access control and enhanced response.
@@ -174,42 +173,45 @@ async def get_appointments(
         if not doctor or not doctor.doctor_profile:
             continue  # Skip appointments with missing doctor profiles
 
-        logger.info(f"Doctor profile for appointment ID {appointment.id}: {doctor.doctor_profile}")
+        logger.info(
+            f"Doctor profile for appointment ID {appointment.id}: {doctor.doctor_profile}"
+        )
 
         logger.debug(f"Processing appointment ID {appointment.id}")
         logger.debug(f"Doctor data: {doctor}")
         logger.debug(f"Doctor profile: {doctor.doctor_profile}")
 
-        enhanced_appointments.append({
-            "id": appointment.id,
-            "patient_id": appointment.patient_id,
-            "doctor_id": appointment.doctor_id,  # Add doctor_id to the response
-            "doctor_profile": {
-                "first_name": doctor.doctor_profile.first_name,
-                "last_name": doctor.doctor_profile.last_name,
-                "specialty": doctor.doctor_profile.specialty
-            },
-            "starts_at": appointment.starts_at,  # Return datetime object
-            "ends_at": appointment.ends_at,      # Return datetime object
-            "location": appointment.location,
-            "notes": appointment.notes,
-            "created_at": appointment.created_at  # Return datetime object
-        })
+        enhanced_appointments.append(
+            {
+                "id": appointment.id,
+                "patient_id": appointment.patient_id,
+                "doctor_id": appointment.doctor_id,  # Add doctor_id to the response
+                "doctor_profile": {
+                    "first_name": doctor.doctor_profile.first_name,
+                    "last_name": doctor.doctor_profile.last_name,
+                    "specialty": doctor.doctor_profile.specialty,
+                },
+                "starts_at": appointment.starts_at,  # Return datetime object
+                "ends_at": appointment.ends_at,  # Return datetime object
+                "location": appointment.location,
+                "notes": appointment.notes,
+                "created_at": appointment.created_at,  # Return datetime object
+            }
+        )
 
     return enhanced_appointments
 
 
 async def get_appointment(
-    db: AsyncSession,
-    appointment_id: int,
-    user_id: int,
-    role: str
-) -> Optional[AppointmentModel]: # Return type changed to AppointmentModel
+    db: AsyncSession, appointment_id: int, user_id: int, role: str
+) -> Optional[AppointmentModel]:  # Return type changed to AppointmentModel
     """
     Get a specific appointment by ID with permission checks.
     Returns the AppointmentModel instance if found and user has access.
     """
-    logger.info(f"Fetching appointment model {appointment_id} for user {user_id} with role {role}")
+    logger.info(
+        f"Fetching appointment model {appointment_id} for user {user_id} with role {role}"
+    )
     result = await db.execute(
         select(AppointmentModel).where(AppointmentModel.id == appointment_id)
     )
@@ -218,12 +220,18 @@ async def get_appointment(
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    logger.info(f"Appointment model {appointment_id} details: Patient ID {appointment.patient_id}, Doctor ID {appointment.doctor_id}")
+    logger.info(
+        f"Appointment model {appointment_id} details: Patient ID {appointment.patient_id}, Doctor ID {appointment.doctor_id}"
+    )
     # Check permissions - user must be the patient, doctor, or admin
-    if (appointment.patient_id != user_id and
-        appointment.doctor_id != user_id and
-        role != "admin"):
-        raise HTTPException(status_code=403, detail="Not authorized to access this appointment")
+    if (
+        appointment.patient_id != user_id
+        and appointment.doctor_id != user_id
+        and role != "admin"
+    ):
+        raise HTTPException(
+            status_code=403, detail="Not authorized to access this appointment"
+        )
 
     # Return the raw model instance. Formatting is moved to the route handler.
     return appointment
@@ -234,7 +242,7 @@ async def update_appointment(
     appointment_id: int,
     user_id: int,
     role: str,
-    update_data: Dict[str, Any]
+    update_data: Dict[str, Any],
 ) -> AppointmentModel:
     """
     Update an existing appointment
@@ -253,7 +261,11 @@ async def update_appointment(
     appointment = await get_appointment(db, appointment_id, user_id, role)
 
     # Check if changing time or doctor, check for conflicts
-    if "starts_at" in update_data or "ends_at" in update_data or "doctor_id" in update_data:
+    if (
+        "starts_at" in update_data
+        or "ends_at" in update_data
+        or "doctor_id" in update_data
+    ):
         doctor_id = update_data.get("doctor_id", appointment.doctor_id)
         starts_at = update_data.get("starts_at", appointment.starts_at)
         ends_at = update_data.get("ends_at", appointment.ends_at)
@@ -264,7 +276,7 @@ async def update_appointment(
                     AppointmentModel.id != appointment_id,
                     AppointmentModel.doctor_id == doctor_id,
                     starts_at < AppointmentModel.ends_at,
-                    ends_at > AppointmentModel.starts_at
+                    ends_at > AppointmentModel.starts_at,
                 )
             )
         )
@@ -283,10 +295,7 @@ async def update_appointment(
 
 
 async def delete_appointment(
-    db: AsyncSession,
-    appointment_id: int,
-    user_id: int,
-    role: str
+    db: AsyncSession, appointment_id: int, user_id: int, role: str
 ) -> bool:
     """
     Delete an appointment
@@ -300,7 +309,9 @@ async def delete_appointment(
     Returns:
         True if the appointment was deleted, False otherwise
     """
-    logger.info(f"Attempting to delete appointment {appointment_id} by user {user_id} with role {role} in CRUD function") # Added log
+    logger.info(
+        f"Attempting to delete appointment {appointment_id} by user {user_id} with role {role} in CRUD function"
+    )  # Added log
     # Get the appointment (this will check permissions)
     appointment = await get_appointment(db, appointment_id, user_id, role)
 
@@ -311,10 +322,7 @@ async def delete_appointment(
 
 
 async def get_doctor_availability(
-    db: AsyncSession,
-    doctor_id: int,
-    date: datetime,
-    slot_duration: int = 30
+    db: AsyncSession, doctor_id: int, date: datetime, slot_duration: int = 30
 ) -> List[datetime]:
     """
     Get available time slots for a doctor on a specific date
@@ -338,8 +346,12 @@ async def get_doctor_availability(
     end_hour = 17
 
     # Get the start and end of the requested date - MAKE TIMEZONE AWARE
-    date_start = datetime(date.year, date.month, date.day, start_hour, 0, tzinfo=timezone.utc)
-    date_end = datetime(date.year, date.month, date.day, end_hour, 0, tzinfo=timezone.utc)
+    date_start = datetime(
+        date.year, date.month, date.day, start_hour, 0, tzinfo=timezone.utc
+    )
+    date_end = datetime(
+        date.year, date.month, date.day, end_hour, 0, tzinfo=timezone.utc
+    )
 
     # Get existing appointments for the doctor on that date
     result = await db.execute(
@@ -347,7 +359,7 @@ async def get_doctor_availability(
             and_(
                 AppointmentModel.doctor_id == doctor_id,
                 AppointmentModel.starts_at >= date_start,
-                AppointmentModel.starts_at < date_start + timedelta(days=1)
+                AppointmentModel.starts_at < date_start + timedelta(days=1),
             )
         )
     )
@@ -387,7 +399,7 @@ async def get_available_slots_for_day(
     doctor_id: int,
     target_date: date,
     slot_duration: int = 30,
-    format_time: bool = True
+    format_time: bool = True,
 ) -> List[str]:
     """
     Get available time slots for a doctor on a specific date formatted as strings
@@ -413,7 +425,7 @@ async def get_available_slots_for_day(
             db=db,
             doctor_id=doctor_id,
             date=target_datetime,
-            slot_duration=slot_duration
+            slot_duration=slot_duration,
         )
 
         # Format times if requested
@@ -429,7 +441,9 @@ async def get_available_slots_for_day(
 
     except Exception as e:
         # Log the error but don't re-raise - return a properly structured error response
-        logger.error(f"Error getting available slots for doctor {doctor_id}: {e}", exc_info=True)
+        logger.error(
+            f"Error getting available slots for doctor {doctor_id}: {e}", exc_info=True
+        )
         # Return empty list which will be handled by the tool to show "no slots available"
         return []
 
@@ -518,3 +532,72 @@ async def delete_appointment(
         # But as a fallback:
         logger.warning(f"CRUD: Appointment {appointment_id} not found for deletion (unexpected after get_appointment call).")
         return False
+
+async def get_doctor_schedule_for_date(
+    db: AsyncSession,
+    doctor_id: int,
+    target_date: date,
+) -> List[Dict[str, Any]]:
+    """
+    Retrieves appointments for a specific doctor on a given date.
+
+    Args:
+        db (AsyncSession): The database session.
+        doctor_id (int): The user_id of the doctor.
+        target_date (date): The specific date to fetch appointments for.
+
+    Returns:
+        List[Dict[str, Any]]: A list of appointment details, including patient information.
+    """
+    logger.info(f"CRUD: Fetching schedule for doctor_id {doctor_id} on {target_date}")
+
+    try:
+        stmt = (
+            select(AppointmentModel)
+            .where(
+                AppointmentModel.doctor_id == doctor_id,
+                # Cast the stored UTC datetime to a DATE for comparison with target_date
+                # This assumes starts_at is a DateTime field.
+                cast(AppointmentModel.starts_at, Date) == target_date,
+            )
+            .options(
+                selectinload(AppointmentModel.patient).selectinload(
+                    UserModel.patient_profile
+                )  # Eager load patient user and then their profile
+            )
+            .order_by(AppointmentModel.starts_at)
+        )
+
+        result = await db.execute(stmt)
+        appointments = result.scalars().all()
+
+        schedule = []
+        if appointments:
+            for appt in appointments:
+                patient_name = "N/A"
+                if appt.patient and appt.patient.patient_profile:
+                    patient_name = f"{appt.patient.patient_profile.first_name} {appt.patient.patient_profile.last_name}"
+
+                schedule.append(
+                    {
+                        "id": appt.id,
+                        "starts_at": appt.starts_at,  # Keep as datetime for now, tool will format
+                        "ends_at": appt.ends_at,  # Keep as datetime
+                        "patient_id": appt.patient_id,
+                        "patient_name": patient_name,
+                        "location": appt.location,
+                        "notes": appt.notes,
+                    }
+                )
+
+        logger.info(
+            f"CRUD: Found {len(schedule)} appointments for doctor_id {doctor_id} on {target_date}"
+        )
+        return schedule
+
+    except Exception as e:
+        logger.error(
+            f"CRUD: Error fetching schedule for doctor {doctor_id} on {target_date}: {e}",
+            exc_info=True,
+        )
+        return []

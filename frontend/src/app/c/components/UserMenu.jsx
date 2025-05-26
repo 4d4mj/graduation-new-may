@@ -14,9 +14,18 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 export function UserMenu({ user }) {
-	function getInitials(user) {
-		const firstNameInitial = user.patient_profile?.first_name?.[0] || "";
-		const lastNameInitial = user.patient_profile?.last_name?.[0] || "";
+function getInitials(user) {
+		let firstNameInitial = "";
+		let lastNameInitial = "";
+
+		if (user.patient_profile) {
+			firstNameInitial = user.patient_profile.first_name?.[0] || "";
+			lastNameInitial = user.patient_profile.last_name?.[0] || "";
+		} else if (user.doctor_profile) {
+			firstNameInitial = user.doctor_profile.first_name?.[0] || "";
+			lastNameInitial = user.doctor_profile.last_name?.[0] || "";
+		}
+
 		return `${firstNameInitial}${lastNameInitial}`.toUpperCase();
 	}
 
@@ -24,7 +33,13 @@ export function UserMenu({ user }) {
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
 				<Button variant="ghost">
-					{user.patient_profile?.first_name}
+					{
+					user.patient_profile ? 
+					user.patient_profile.first_name :
+					user.doctor_profile ?
+					user.doctor_profile.first_name :
+					null
+					}
 					<Avatar>
 						<AvatarFallback>{getInitials(user)}</AvatarFallback>
 					</Avatar>
