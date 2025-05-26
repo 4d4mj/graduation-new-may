@@ -484,37 +484,37 @@ async def get_appointments_for_doctor_on_date(
     logger.info(f"CRUD: Found {len(appointments)} 'scheduled' appointments for doctor {doctor_id} on {target_date}")
     return appointments
 
-async def cancel_appointment_by_id_for_doctor(
+async def delete_appointment(
     db: AsyncSession,
     appointment_id: int,
-    doctor_id: int
+    user_id: int, # This is the ID of the user initiating the delete
+    role: str     # Role of the user
 ) -> bool:
     """
-    Cancels a specific appointment by setting its status to 'cancelled_by_doctor'.
-    Ensures the appointment belongs to the doctor and is currently 'scheduled'.
+    Delete an appointment.
+    Ensures the user has permission based on their role.
+    Patient can delete their own. Doctor can delete appointments they are part of.
+    Admin can delete any.
     """
-    logger.info(f"CRUD: Doctor {doctor_id} attempting to cancel appointment {appointment_id} by updating status.") # Clarified action
-    stmt = (
-        update(AppointmentModel) # Ensure AppointmentModel is imported
-        .where(
-            AppointmentModel.id == appointment_id,
-            AppointmentModel.doctor_id == doctor_id, # Check it belongs to this doctor
-            AppointmentModel.status == "scheduled"   # Only cancel if currently scheduled
-        )
-        .values(status="cancelled_by_doctor") # Set the new status
-        .returning(AppointmentModel.id) # To check if any row was actually updated
-    )
-    result = await db.execute(stmt)
-    updated_id = result.scalar_one_or_none()
-    if updated_id:
+    logger.info(f"CRUD: User {user_id} (role: {role}) attempting to hard delete appointment_id={appointment_id}")
+
+    # First, get the appointment to check ownership/permissions
+    # get_appointment already handles role-based access checks and raises HTTPException if not authorized or not found
+    try:
+        appointment_to_delete = await get_appointment(db, appointment_id, user_id, role)
+    except HTTPException as http_exc:
+        # If get_appointment raises an error (e.g., not found, not authorized), propagate a failure.
+        logger.warning(f"CRUD: Permission check failed or appointment not found for hard delete. Appt ID: {appointment_id}, User: {user_id}, Role: {role}. Detail: {http_exc.detail}")
+        return False # Indicate failure
+
+    # If get_appointment didn't raise an exception, then appointment_to_delete exists and user is authorized.
+    if appointment_to_delete:
+        await db.delete(appointment_to_delete)
         await db.commit()
-        logger.info(f"CRUD: Successfully set status to 'cancelled_by_doctor' for appointment_id={appointment_id}")
+        logger.info(f"CRUD: Successfully hard deleted appointment_id={appointment_id}")
         return True
     else:
-        # This can happen if appointment_id doesn't exist, doesn't belong to doctor_id, or its status is not 'scheduled'
-        logger.warning(
-            f"CRUD: Failed to set status to 'cancelled_by_doctor' for appointment_id={appointment_id}. "
-            "It might not exist, not belong to the doctor, or is not in a 'scheduled' state."
-        )
-        await db.rollback() # Good practice, though not strictly necessary if no changes were staged
+        # This case should ideally be caught by get_appointment raising an error for "not found".
+        # But as a fallback:
+        logger.warning(f"CRUD: Appointment {appointment_id} not found for deletion (unexpected after get_appointment call).")
         return False
