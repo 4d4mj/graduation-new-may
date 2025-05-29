@@ -1,3 +1,4 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/4d4mj/graduation-new-may)
 # Graduation Project Setup and Execution
 
 This document outlines the steps to set up, run, and manage the Graduation Project application.
