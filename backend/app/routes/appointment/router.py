@@ -60,7 +60,7 @@ class Appointment(AppointmentBase):
     patient_id: int
     created_at: datetime
     doctor_profile: Optional[AppointmentDoctorProfile] = None
-    patient_profile: Optional[AppointmentPatientProfile] = None # Added for doctor's view
+    patient_name: Optional[str] = None
 
     class Config:
         from_attributes = True

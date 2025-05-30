@@ -107,8 +107,7 @@ function DoctorSideBarItem({ appointment }) {
 	return (
 		<Alert>
 			<AlertTitle>
-				Patient: {appointment.patient_profile?.first_name}{" "}
-				{appointment.patient_profile?.last_name}
+				Patient: {appointment.patient_name}
 			</AlertTitle>
 			<AlertDescription>
 				<div className="flex gap-2 items-center">

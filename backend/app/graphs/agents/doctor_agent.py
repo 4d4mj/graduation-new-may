@@ -15,6 +15,7 @@ from app.tools.database_query_tools import (
     get_my_schedule,
     # execute_doctor_day_cancellation_confirmed,
     get_my_financial_summary,
+    discharge_appointment,
 )
 
 from app.tools.bulk_cancel_tool import (
@@ -37,6 +38,7 @@ PATIENT_DB_QUERY_TOOLS = [
     get_my_schedule,
     # execute_doctor_day_cancellation_confirmed,
     get_my_financial_summary,
+    discharge_appointment,
 ]
 
 BULK_OPERATION_TOOLS = [cancel_doctor_appointments_for_date]
@@ -79,7 +81,16 @@ YOUR AVAILABLE TOOLS (For medical/patient data tasks ONLY):
     *   **`get_my_schedule`**: Fetches *your own (the doctor's)* appointment schedule for a specific day.
         Use this tool if you (the doctor) ask "What's my schedule for today?", "Do I have appointments tomorrow?", or "What is on my calendar for July 10th?".
         The `date_query` parameter should be the day the doctor is asking about (e.g., "today", "tomorrow", "July 10th", "next Monday"). It defaults to "today" if unclear.
-            
+    *   **`discharge_appointment`**: Marks a specific appointment as discharged or completed.
+        -   Requires the `appointment_id` of the appointment.
+        -   **Workflow for Discharging:**
+            1. If the doctor provides an appointment ID directly (e.g., "Discharge appointment 123"), use this tool with that ID.
+            2. If the doctor refers to an appointment by patient name, date, or time (e.g., "Alice's appointment from this morning is done"), you MUST first use the `get_patient_appointment_history` tool to find the specific appointment(s) for that patient on that day.
+            3. Present the found appointment(s) to the doctor, INCLUDING THEIR IDs.
+            4. Ask the doctor to confirm which appointment ID they wish to discharge.
+            5. Once the doctor provides the specific `appointment_id`, then call this `discharge_appointment` tool.
+        -   Do NOT call this tool with just a patient name; an `appointment_id` is essential.
+    
 3.  **Bulk Appointment Cancellation Tool for a Specific Date:**
     *   `cancel_doctor_appointments_for_date`: Use this tool to cancel ALL of *your own (the doctor's)* 'scheduled' appointments for a specified day *after* you have explicitly confirmed this action in the conversation.
         -   Requires `date_query` (string): The date for which to cancel appointments (e.g., "today", "tomorrow", "July 10th"). This should be the same `date_query` used with `get_my_schedule` in the confirmation step.
@@ -136,6 +147,13 @@ WORKFLOW FOR PATIENT DATABASE QUERIES:
     *   If the doctor asks about their salary, bonus, or raises: Use `get_my_financial_summary`.
     *   **If the doctor asks about the salary or financial details of another doctor or individual: Directly refuse as instructed in the "IMPORTANT PRIVACY NOTE FOR FINANCIAL QUERIES ABOUT OTHERS" under the `get_my_financial_summary` tool description.
         Do not proceed with any tool for this specific type of query.**
+    *   If the doctor wants to mark an appointment as discharged/completed:
+        a.  Check if they provided an `appointment_id`. If yes, proceed to call `discharge_appointment`.
+        b.  If they provided patient name, date/time details:
+            i.  Call `get_patient_appointment_history` to find matching appointments for that patient and period.
+            ii. Present the list of matching appointments (with their IDs) to the doctor.
+            iii. Ask the doctor to specify the `appointment_id` they want to discharge.
+            iv. Once the doctor confirms an ID, then you can prepare to call `discharge_appointment`.
 2.  Identify Tool & Parameters:
     *   For re-calling after doctor confirmed "yes" to a cancellation proposal: `manage_doctor_day_cancellation(date_query="...", confirmed_payload=THE_CONFIRMATION_DICTIONARY_YOU_RECEIVED_AS_OBSERVATION)`.
     *   For your own schedule: Use `get_my_schedule`. Provide the `date_query` based on the doctor's request (e.g., "today", "tomorrow", "YYYY-MM-DD").
@@ -236,6 +254,27 @@ AI Action: get_my_financial_summary()
 (Tool Output: "Here's a summary of the financial information for Dr. John Smith from our records:\n- Annual Base Salary: $185,000.00\n- Last Bonus: $7,500.00 on 2024-12-20. Reason: Exceptional patient satisfaction scores and contributions to Q4 targets.\n...\nPlease note: For official and complete details, please always refer to the HR department or your employment contract.")
 AI Thought: I have the financial information from the records. I will relay it and include the mandatory disclaimer.
 AI to Doctor: "According to our records for Dr. John Smith: Your annual base salary is $185,000. Your last bonus was $7,500 on December 20, 2024, due to exceptional patient satisfaction scores and contributions to Q4 targets. Please note, for official and complete details, please refer to the HR department or your employment contract."
+
+Example - Discharging an Appointment:
+    Doctor: My 9 AM appointment today can be discharged.
+    AI Thought: Doctor wants to discharge an appointment but didn't provide an ID. I need to check their schedule for today to find it.
+    AI Action: get_my_schedule(date_query="today")
+    (Tool Output for get_my_schedule: "Your schedule for Friday, May 30, 2025:\n- ID: 123, 09:00 AM - 09:30 AM: Patient: Ali Elia (Reason: Ear Infection)\n- ID: 124, 01:15 PM - 02:00 PM: Patient: Another Patient (Reason: Checkup)")
+    AI Thought: The doctor mentioned a 9 AM appointment. I found ID 123 for Ali Elia at 9 AM. I should confirm this specific ID with the doctor.
+    AI to Doctor: "Okay, I see you have an appointment with Ali Elia at 9:00 AM today (ID: 123). Is this the one you'd like to mark as discharged?"
+
+    Doctor: Yes, discharge ID 123.
+    AI Thought: Doctor confirmed ID 123. Now I can use the discharge_appointment tool.
+    AI Action: discharge_appointment(appointment_id=123)
+    (Tool Output from discharge_appointment: "Successfully marked appointment ID 123 as discharged.")
+    AI Thought: Relay confirmation.
+    AI to Doctor: "Appointment ID 123 with Ali Elia has been marked as discharged."
+
+    Doctor: Mark appointment 789 as completed.
+    AI Thought: Doctor provided an ID directly.
+    AI Action: discharge_appointment(appointment_id=789)
+    (Tool Output: "Successfully marked appointment ID 789 as discharged.")
+    AI to Doctor: "Appointment ID 789 has been marked as discharged."
 """
 
 

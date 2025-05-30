@@ -14,6 +14,7 @@ from app.db.crud.appointment import (
     get_doctor_schedule_for_date,
     delete_appointment,
     get_appointment,
+    mark_appointment_discharged,
 )
 from app.db.models import PatientModel
 
@@ -236,14 +237,10 @@ async def get_patient_allergies_info(
 async def get_patient_appointment_history(
     patient_full_name: str,
     user_id: Annotated[int, InjectedState("user_id")],
-    user_tz: Annotated[
-        Optional[str], InjectedState("user_tz")
-    ],  # Get user_tz from state
-    date_filter: Optional[
-        str
-    ] = None,  # e.g., "upcoming", "past_7_days", "past_30_days", "all"
-    specific_date_str: Optional[str] = None,  # e.g., "today", "tomorrow", "2024-07-15"
-    limit: Optional[int] = 10,  # Default limit for appointments listed
+    user_tz: Annotated[Optional[str], InjectedState("user_tz")],
+    date_filter: Optional[str] = None,
+    specific_date_str: Optional[str] = None,
+    limit: Optional[int] = 10,
 ) -> str:
     """
     Fetches appointment history for a specific patient linked to the requesting doctor.
@@ -262,106 +259,104 @@ async def get_patient_appointment_history(
             patients = await find_patients_by_name_and_verify_doctor_link(
                 db, full_name=patient_full_name, requesting_doctor_id=user_id
             )
-
             if not patients:
                 return f"No patient named '{patient_full_name}' found with an appointment record associated with you."
             if len(patients) > 1:
-                # ... (ambiguity handling as in get_patient_info) ...
                 response_lines = [
                     f"Multiple patients named '{patient_full_name}' found who have had appointments with you. Please specify using their date of birth:"
                 ]
-                for p in patients:
+                for p_obj in patients:
                     dob_str = (
-                        p.dob.strftime("%Y-%m-%d") if p.dob else "DOB not available"
+                        p_obj.dob.strftime("%Y-%m-%d")
+                        if p_obj.dob
+                        else "DOB not available"
                     )
                     response_lines.append(
-                        f"- {p.first_name} {p.last_name} (DOB: {dob_str})"
+                        f"- {p_obj.first_name} {p_obj.last_name} (User ID: {p_obj.user_id}, DOB: {dob_str})"
                     )
                 return "\n".join(response_lines)
-
             patient = patients[0]
 
-            # --- Date Logic ---
-            now_utc = datetime.now(TZ.utc)
-            effective_user_tz_str = user_tz or "UTC"  # Default to UTC if not provided
+            effective_user_tz_str = user_tz or "UTC"
             try:
                 effective_user_tz = ZoneInfo(effective_user_tz_str)
             except Exception:
                 logger.warning(f"Invalid user_tz '{user_tz}', defaulting to UTC.")
                 effective_user_tz = ZoneInfo("UTC")
+                # effective_user_tz_str = "UTC" # Not strictly needed to re-assign here for dateparser
 
-            now_user_tz = datetime.now(effective_user_tz)
+            now_user_tz = datetime.now(
+                effective_user_tz
+            )  # Current time in user's timezone
 
-            date_from_dt_utc: Optional[datetime] = None
-            date_to_dt_utc: Optional[datetime] = None
-            filter_description = "all"  # Default description
+            # Initialize date parameters for CRUD
+            crud_date_from: Optional[datetime] = None
+            crud_date_to: Optional[datetime] = None
+            crud_target_specific_date: Optional[DateClass] = None
+            filter_description = "all recorded"  # Default
 
             if specific_date_str:
-                # Use dateparser for natural language dates
-                parsed_date = dateparser.parse(
+                # Parse the date string strictly in the user's timezone context to get the correct local day
+                parsed_date_in_user_tz = dateparser.parse(
                     specific_date_str,
                     settings={
-                        "TIMEZONE": effective_user_tz_str,
-                        "TO_TIMEZONE": "UTC",  # Ask dateparser to convert to UTC
-                        "RETURN_AS_TIMEZONE_AWARE": True,
-                        "PREFER_DATES_FROM": "current_period",
-                        "RELATIVE_BASE": now_user_tz,  # Parse relative to user's current time
+                        "TIMEZONE": effective_user_tz_str,  # Interpret "July 1" as July 1 in this TZ
+                        "RETURN_AS_TIMEZONE_AWARE": True,  # Ensures tzinfo is set
+                        "PREFER_DATES_FROM": "current_period",  # Helps with "today", "tomorrow"
+                        "RELATIVE_BASE": now_user_tz,  # now_user_tz is already localized
+                        # NO "TO_TIMEZONE": "UTC" here, we want the date component of the local day
                     },
                 )
-                if parsed_date:
-                    # For a specific date, get the whole day in UTC
-                    # Ensure parsed_date is timezone-aware; if not, assume it's in user_tz
-                    if parsed_date.tzinfo is None:
-                        parsed_date = effective_user_tz.localize(
-                            parsed_date
-                        )  # Localize if naive
-
-                    start_of_day_user = parsed_date.replace(
-                        hour=0, minute=0, second=0, microsecond=0
+                if parsed_date_in_user_tz:
+                    crud_target_specific_date = (
+                        parsed_date_in_user_tz.date()
+                    )  # Get the date object
+                    filter_description = (
+                        f"on {crud_target_specific_date.strftime('%Y-%m-%d')}"
                     )
-                    end_of_day_user = parsed_date.replace(
-                        hour=23, minute=59, second=59, microsecond=999999
-                    )
-                    date_from_dt_utc = start_of_day_user.astimezone(TZ.utc)
-                    date_to_dt_utc = end_of_day_user.astimezone(TZ.utc)
-                    filter_description = f"on {start_of_day_user.strftime('%Y-%m-%d')}"
                 else:
                     return f"Could not understand the date: '{specific_date_str}'. Please use YYYY-MM-DD or terms like 'today', 'last Monday'."
 
             elif date_filter:
                 date_filter_lower = date_filter.lower()
                 if date_filter_lower == "upcoming":
-                    date_from_dt_utc = now_utc
+                    crud_date_from = datetime.now(TZ.utc)  # From now (UTC) onwards
                     filter_description = "upcoming"
                 elif date_filter_lower == "past_7_days":
-                    date_from_dt_utc = (now_utc - timedelta(days=7)).replace(
+                    # Start of 7 days ago in user's timezone, then convert to UTC
+                    start_of_period_user_tz = (now_user_tz - timedelta(days=7)).replace(
                         hour=0, minute=0, second=0, microsecond=0
                     )
-                    date_to_dt_utc = now_utc  # End of today (UTC)
+                    crud_date_from = start_of_period_user_tz.astimezone(TZ.utc)
+                    crud_date_to = datetime.now(TZ.utc)  # Until now (UTC)
                     filter_description = "in the past 7 days"
                 elif date_filter_lower == "past_30_days":
-                    date_from_dt_utc = (now_utc - timedelta(days=30)).replace(
-                        hour=0, minute=0, second=0, microsecond=0
-                    )
-                    date_to_dt_utc = now_utc  # End of today (UTC)
+                    start_of_period_user_tz = (
+                        now_user_tz - timedelta(days=30)
+                    ).replace(hour=0, minute=0, second=0, microsecond=0)
+                    crud_date_from = start_of_period_user_tz.astimezone(TZ.utc)
+                    crud_date_to = datetime.now(TZ.utc)
                     filter_description = "in the past 30 days"
-                elif date_filter_lower == "all":
-                    filter_description = "all recorded"
-                    # date_from_dt_utc and date_to_dt_utc remain None
-                else:
+                elif date_filter_lower != "all":  # 'all' implies no date filters
                     return f"Unknown date_filter: '{date_filter}'. Try 'upcoming', 'past_7_days', 'past_30_days', or 'all', or provide a 'specific_date_str'."
-            else:  # Default if neither specific_date nor date_filter provided
-                date_from_dt_utc = now_utc  # Default to upcoming
-                filter_description = "upcoming (default)"
-            # --- End Date Logic ---
+                # If 'all', crud_date_from, crud_date_to, crud_target_specific_date remain None
+
+            else:  # Default if neither specific_date_str nor date_filter is provided
+                # Let's default to "all recorded" for patient history unless specified,
+                # or you can choose "upcoming" like for get_my_schedule.
+                # For patient history, "all" might be a more common initial request.
+                filter_description = (
+                    "all recorded"  # crud_date_from and crud_date_to will be None
+                )
 
             appointments_data = await get_appointments(
                 db,
-                user_id=user_id,  # doctor_id
+                user_id=user_id,
                 role="doctor",
                 patient_id=patient.user_id,
-                date_from=date_from_dt_utc,
-                date_to=date_to_dt_utc,
+                date_from=crud_date_from,  # Pass the potentially None value
+                date_to=crud_date_to,  # Pass the potentially None value
+                target_specific_date=crud_target_specific_date,  # Pass the potentially None value
                 limit=limit,
             )
 
@@ -372,17 +367,26 @@ async def get_patient_appointment_history(
                 f"Appointments for {patient.first_name} {patient.last_name} with you ({filter_description}):"
             ]
             for appt_dict in appointments_data:
-                # starts_at from DB is already UTC if stored correctly
                 starts_at_utc = appt_dict["starts_at"]
-                # Convert to user's timezone for display
+                if not isinstance(starts_at_utc, datetime):
+                    starts_at_utc = datetime.min.replace(tzinfo=TZ.utc)
+                elif starts_at_utc.tzinfo is None:
+                    starts_at_utc = starts_at_utc.replace(tzinfo=TZ.utc)
+
                 starts_at_user_tz = starts_at_utc.astimezone(effective_user_tz)
                 display_time = starts_at_user_tz.strftime("%Y-%m-%d %I:%M %p %Z")
-
-                response_lines.append(
-                    f"- Date: {display_time}, Location: {appt_dict['location']}, Notes: {appt_dict.get('notes', 'N/A')}"
+                appointment_id = appt_dict["id"]
+                discharged_status = (
+                    "(Discharged)" if appt_dict.get("is_discharged", False) else ""
                 )
 
-            if len(appointments_data) == limit:
+                response_lines.append(
+                    f"- ID: {appointment_id}, Date: {display_time}, Location: {appt_dict['location']}, Notes: {appt_dict.get('notes', 'N/A')} {discharged_status}"
+                )
+
+            if (
+                len(appointments_data) == limit and len(appointments_data) > 0
+            ):  # only show if limit was possibly hit
                 response_lines.append(
                     f"\n(Showing up to {limit} appointments. More may exist.)"
                 )
@@ -490,9 +494,10 @@ async def get_my_schedule(
 
                 patient_info = f"Patient: {appt['patient_name']}"
                 notes_info = f"(Reason: {appt['notes']})" if appt["notes"] else ""
+                appointment_id = appt["id"]
 
                 schedule_lines.append(
-                    f"- {starts_at_local.strftime('%I:%M %p')} - {ends_at_local.strftime('%I:%M %p')}: {patient_info} {notes_info}"
+                    f"- ID: {appointment_id}, {starts_at_local.strftime('%I:%M %p')} - {ends_at_local.strftime('%I:%M %p')}: {patient_info} {notes_info}"
                 )
 
             return "\n".join(schedule_lines)
@@ -698,3 +703,38 @@ async def get_my_financial_summary(
     )
 
     return "\n".join(response_lines)
+
+
+@tool("discharge_appointment")
+async def discharge_appointment(
+    appointment_id: Annotated[
+        int, "The unique ID of the appointment to be marked as discharged."
+    ],
+    user_id: Annotated[int, InjectedState("user_id")],  # This is the doctor's ID
+) -> str:
+    """
+    Marks a specific appointment as discharged or completed.
+    The AI assistant should first help the doctor identify the correct appointment ID
+    if the doctor doesn't provide it directly (e.g., by using get_patient_appointment_history).
+    Only call this tool with a confirmed appointment_id.
+    """
+    logger.info(
+        f"Tool 'discharge_appointment' invoked by doctor_id '{user_id}' for appointment_id '{appointment_id}'"
+    )
+
+    if not isinstance(appointment_id, int):
+        return "Error: Appointment ID must be a valid number."
+
+    async with tool_db_session() as db:
+        updated_appointment = await mark_appointment_discharged(
+            db, appointment_id=appointment_id, doctor_id=user_id
+        )
+
+        if updated_appointment:
+            if updated_appointment.is_discharged:  # Confirm it was set
+                return f"Successfully marked appointment ID {appointment_id} as discharged."
+            else:
+                # This case should ideally not happen if logic is correct
+                return f"Attempted to mark appointment ID {appointment_id} as discharged, but the status did not change."
+        else:
+            return f"Could not mark appointment ID {appointment_id} as discharged. It might not exist, may not belong to you, or an error occurred."

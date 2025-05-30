@@ -7,6 +7,7 @@ from sqlalchemy import (
     Text,
     ForeignKey,
     UniqueConstraint,
+    Boolean,
 )
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -24,6 +25,7 @@ class AppointmentModel(Base):
     location = Column(String, nullable=False)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_discharged = Column(Boolean, default=False, nullable=False, server_default="f")
 
     status = Column(
         String, default="scheduled", nullable=False

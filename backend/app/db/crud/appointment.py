@@ -145,113 +145,144 @@ async def create_appointment(
 
 async def get_appointments(
     db: AsyncSession,
-    user_id: int,
-    role: str,
+    user_id: int,  # ID of the user making the request
+    role: str,  # Role of the user making the request
     skip: int = 0,
     limit: int = 100,
-    doctor_id: Optional[int] = None,
-    patient_id: Optional[int] = None,
+    doctor_id: Optional[int] = None,  # Optional filter: for which doctor's appointments
+    patient_id: Optional[
+        int
+    ] = None,  # Optional filter: for which patient's appointments
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    target_specific_date: Optional[
+        date
+    ] = None,  # <<< THIS IS THE NEW/REQUIRED PARAMETER
 ) -> List[Dict[str, Any]]:
     """
-    Get appointments based on filters with role-based access control and enhanced response.
-
-    Args:
-        db: Database session
-        user_id: ID of the current user
-        role: Role of the current user (patient, doctor, admin)
-        skip: Number of records to skip
-        limit: Maximum number of records to return
-        doctor_id: Filter by doctor ID
-        patient_id: Filter by patient ID
-        date_from: Filter by appointments starting at or after this date
-        date_to: Filter by appointments starting at or before this date
-
-    Returns:
-        List of appointments with formatted dates and doctor profiles.
+    Get appointments based on filters with role-based access control.
+    Prioritizes target_specific_date if provided; otherwise, uses date_from/date_to.
     """
+    logger.debug(
+        f"CRUD get_appointments: user_id={user_id}, role='{role}', doctor_id={doctor_id}, patient_id={patient_id}, "
+        f"date_from={date_from}, date_to={date_to}, target_specific_date={target_specific_date}, "
+        f"skip={skip}, limit={limit}"
+    )
+
     query = select(AppointmentModel)
 
-    # Apply role-based filtering
+    # Apply primary role-based filtering (who is asking and what they can see by default)
     if role == "doctor":
         query = query.where(AppointmentModel.doctor_id == int(user_id))
+        # If a doctor is asking, and they also specify a patient_id, further filter for that patient.
+        if patient_id is not None:
+            query = query.where(AppointmentModel.patient_id == int(patient_id))
+        # A doctor generally shouldn't be using the doctor_id filter for anyone but themselves unless it's an admin feature
+        if doctor_id is not None and int(doctor_id) != int(user_id):
+            logger.warning(
+                f"Doctor {user_id} querying for appointments of another doctor {doctor_id}. This might be an admin action or misconfiguration."
+            )
+            # If you want to strictly enforce a doctor only sees their own, even if doctor_id is passed:
+            # query = query.where(AppointmentModel.doctor_id == int(user_id))
+            # Or if you allow this (e.g. for admins impersonating or specific cross-doctor views):
+            query = query.where(AppointmentModel.doctor_id == int(doctor_id))
+
     elif role == "patient":
         query = query.where(AppointmentModel.patient_id == int(user_id))
-    elif role != "admin":
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # If a patient is asking, and they also specify a doctor_id, filter for that doctor.
+        if doctor_id is not None:
+            query = query.where(AppointmentModel.doctor_id == int(doctor_id))
+        # A patient cannot query for other patients' appointments via the patient_id filter
+        if patient_id is not None and int(patient_id) != int(user_id):
+            logger.warning(
+                f"Patient {user_id} trying to query for another patient {patient_id}. Denying."
+            )
+            return []
 
-    # Apply optional filters
-    if doctor_id:
-        query = query.where(AppointmentModel.doctor_id == int(doctor_id))
-    if patient_id:
-        query = query.where(AppointmentModel.patient_id == int(patient_id))
-    if date_from:
+    elif role == "admin":
+        # Admin can filter by specific doctor_id or patient_id if provided
+        if doctor_id is not None:
+            query = query.where(AppointmentModel.doctor_id == int(doctor_id))
+        if patient_id is not None:
+            query = query.where(AppointmentModel.patient_id == int(patient_id))
+    else:
+        logger.error(f"Unknown role '{role}' attempting to get appointments.")
+        raise HTTPException(
+            status_code=403, detail="Insufficient permissions for an unknown role."
+        )
+
+    # --- DATE FILTERING LOGIC ---
+    if target_specific_date:
+        logger.debug(
+            f"Filtering appointments for specific date: {target_specific_date}"
+        )
+        query = query.where(
+            cast(AppointmentModel.starts_at, Date) == target_specific_date
+        )
+    elif date_from and date_to:
+        logger.debug(f"Filtering appointments from {date_from} to {date_to}")
+        # Ensure date_from and date_to are timezone-aware if starts_at is
+        query = query.where(
+            AppointmentModel.starts_at >= date_from,
+            AppointmentModel.starts_at <= date_to,
+        )
+    elif date_from:  # Only start date provided (e.g., upcoming)
+        logger.debug(f"Filtering appointments from {date_from} onwards")
         query = query.where(AppointmentModel.starts_at >= date_from)
-    if date_to:
+    elif date_to:  # Only end date provided
+        logger.debug(f"Filtering appointments up to {date_to}")
         query = query.where(AppointmentModel.starts_at <= date_to)
 
-    query = query.offset(skip).limit(limit)
+    query = query.order_by(AppointmentModel.starts_at).offset(skip).limit(limit)
+
     result = await db.execute(query)
-    appointments = result.scalars().all()
+    appointments_models = result.scalars().all()
 
     enhanced_appointments = []
-    for appointment in appointments:
-        # Fetch the doctor profile
-        doctor = await get_user(db, appointment.doctor_id)
-        # Initialize patient_profile as None
-        patient_profile_data = None
+    for appt_model in appointments_models:
+        # Initialize with defaults
+        doctor_profile_data = {"first_name": "N/A", "last_name": "", "specialty": "N/A"}
+        patient_name_str = "N/A"
 
-        # If the current user is a doctor, fetch the patient profile
-        if role == "doctor":
-            patient = await get_user(db, appointment.patient_id)
-            if patient and patient.patient_profile:
-                patient_profile_data = {
-                    "first_name": patient.patient_profile.first_name,
-                    "last_name": patient.patient_profile.last_name,
-                    # Add other patient profile fields if needed, e.g., "email": patient.email
-                }
-            elif patient:
-                 # Handle case where patient exists but profile might be missing (if applicable)
-                logger.warning(f"Patient profile missing for patient_id {appointment.patient_id} in appointment {appointment.id}")
-            else:
-                logger.warning(f"Patient not found for patient_id {appointment.patient_id} in appointment {appointment.id}")
-
-        doctor_profile_data = None
-        if doctor and doctor.doctor_profile:
+        # Fetch doctor for this appointment to get profile
+        # This assumes AppointmentModel has a 'doctor' relationship to UserModel
+        doc_user = await get_user(
+            db, appt_model.doctor_id
+        )  # Using the minimal get_user
+        if doc_user and doc_user.doctor_profile:
             doctor_profile_data = {
-                "first_name": doctor.doctor_profile.first_name,
-                "last_name": doctor.doctor_profile.last_name,
-                "specialty": doctor.doctor_profile.specialty,
+                "first_name": doc_user.doctor_profile.first_name,
+                "last_name": doc_user.doctor_profile.last_name,
+                "specialty": doc_user.doctor_profile.specialty,
             }
-        elif doctor:
-            logger.warning(f"Doctor profile missing for doctor_id {appointment.doctor_id} in appointment {appointment.id}")
-        else:
-            logger.warning(f"Doctor not found for doctor_id {appointment.doctor_id} in appointment {appointment.id}")
 
-        # Skip appointment if essential doctor profile is missing (retain original logic if needed or adjust)
-        # For now, we'll include the appointment even if a profile is partially missing,
-        # but the profile data itself will be None or incomplete.
-        # if not doctor_profile_data:
-        #     continue
-
-        logger.debug(f"Processing appointment ID {appointment.id}")
+        # Fetch patient for this appointment to get name
+        # This assumes AppointmentModel has a 'patient' relationship to UserModel
+        pat_user = await get_user(
+            db, appt_model.patient_id
+        )  # Using the minimal get_user
+        if pat_user and pat_user.patient_profile:
+            patient_name_str = f"{pat_user.patient_profile.first_name} {pat_user.patient_profile.last_name}".strip()
 
         enhanced_appointments.append(
             {
-                "id": appointment.id,
-                "patient_id": appointment.patient_id,
-                "doctor_id": appointment.doctor_id,
+                "id": appt_model.id,
+                "patient_id": appt_model.patient_id,
+                "patient_name": patient_name_str,  # Include patient name
+                "doctor_id": appt_model.doctor_id,
                 "doctor_profile": doctor_profile_data,
-                "patient_profile": patient_profile_data, # Add patient_profile to the response
-                "starts_at": appointment.starts_at,
-                "ends_at": appointment.ends_at,
-                "location": appointment.location,
-                "notes": appointment.notes,
-                "created_at": appointment.created_at,
+                "starts_at": appt_model.starts_at,
+                "ends_at": appt_model.ends_at,
+                "location": appt_model.location,
+                "notes": appt_model.notes,
+                "created_at": appt_model.created_at,
+                "is_discharged": getattr(appt_model, "is_discharged", False),
             }
         )
 
+    logger.info(
+        f"CRUD get_appointments: Found {len(enhanced_appointments)} appointments matching criteria."
+    )
     return enhanced_appointments
 
 
@@ -661,3 +692,65 @@ async def get_appointments_for_doctor_on_date(
         f"CRUD: Found {len(appointments)} 'scheduled' appointments for doctor {doctor_id} on {target_date}"
     )
     return appointments
+
+
+async def mark_appointment_discharged(
+    db: AsyncSession,
+    appointment_id: int,
+    doctor_id: int,  # To ensure the doctor owns this appointment
+) -> Optional[AppointmentModel]:
+    """
+    Marks a specific appointment as discharged.
+    Ensures the appointment belongs to the requesting doctor.
+    """
+    logger.info(
+        f"CRUD: Attempting to mark appointment_id {appointment_id} as discharged by doctor_id {doctor_id}"
+    )
+
+    # Use the existing get_appointment which has permission checks
+    try:
+        # Role 'doctor' for permission check within get_appointment
+        appointment_to_update = await get_appointment(
+            db, appointment_id=appointment_id, user_id=doctor_id, role="doctor"
+        )
+    except HTTPException as e:
+        if e.status_code == 404:
+            logger.warning(
+                f"CRUD: Appointment {appointment_id} not found for doctor {doctor_id}."
+            )
+            return None
+        elif e.status_code == 403:
+            logger.warning(
+                f"CRUD: Doctor {doctor_id} not authorized to modify appointment {appointment_id}."
+            )
+            return None
+        raise  # Re-raise other HTTPExceptions
+
+    if not appointment_to_update:
+        logger.warning(
+            f"CRUD: Appointment {appointment_id} not found or not associated with doctor_id {doctor_id}."
+        )
+        return None
+
+    if appointment_to_update.is_discharged:
+        logger.info(
+            f"CRUD: Appointment {appointment_id} is already marked as discharged."
+        )
+        # Optionally return it anyway, or a specific message
+        return appointment_to_update
+
+    appointment_to_update.is_discharged = True
+    try:
+        await db.commit()
+        await db.refresh(appointment_to_update)
+        logger.info(
+            f"CRUD: Successfully marked appointment {appointment_id} as discharged."
+        )
+        return appointment_to_update
+    except Exception as e:
+        await db.rollback()
+        logger.error(
+            f"CRUD: Error committing discharge for appointment {appointment_id}: {e}",
+            exc_info=True,
+        )
+        return None
