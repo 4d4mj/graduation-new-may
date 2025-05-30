@@ -207,7 +207,7 @@ export default async function ChatSideBar({ user }) {
 				</h3>
 			</SidebarHeader>
 			<SidebarContent className={"px-2"}>
-				<SidebarGroup className={"space-y-2 bg-slate-"}>
+				<SidebarGroup className={"space-y-2"}>
 					{appointments.map((appointment) =>
 						userRole === "doctor" ? (
 							<DoctorSideBarItem
