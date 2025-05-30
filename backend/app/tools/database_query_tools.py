@@ -14,6 +14,7 @@ from app.db.crud.appointment import (
     get_doctor_schedule_for_date,
     delete_appointment,
     get_appointment,
+    mark_appointment_discharged,
 )
 from app.db.models import PatientModel
 
@@ -490,9 +491,10 @@ async def get_my_schedule(
 
                 patient_info = f"Patient: {appt['patient_name']}"
                 notes_info = f"(Reason: {appt['notes']})" if appt["notes"] else ""
+                appointment_id = appt["id"]
 
                 schedule_lines.append(
-                    f"- {starts_at_local.strftime('%I:%M %p')} - {ends_at_local.strftime('%I:%M %p')}: {patient_info} {notes_info}"
+                    f"- ID: {appointment_id}, {starts_at_local.strftime('%I:%M %p')} - {ends_at_local.strftime('%I:%M %p')}: {patient_info} {notes_info}"
                 )
 
             return "\n".join(schedule_lines)
@@ -698,3 +700,38 @@ async def get_my_financial_summary(
     )
 
     return "\n".join(response_lines)
+
+
+@tool("discharge_appointment")
+async def discharge_appointment(
+    appointment_id: Annotated[
+        int, "The unique ID of the appointment to be marked as discharged."
+    ],
+    user_id: Annotated[int, InjectedState("user_id")],  # This is the doctor's ID
+) -> str:
+    """
+    Marks a specific appointment as discharged or completed.
+    The AI assistant should first help the doctor identify the correct appointment ID
+    if the doctor doesn't provide it directly (e.g., by using get_patient_appointment_history).
+    Only call this tool with a confirmed appointment_id.
+    """
+    logger.info(
+        f"Tool 'discharge_appointment' invoked by doctor_id '{user_id}' for appointment_id '{appointment_id}'"
+    )
+
+    if not isinstance(appointment_id, int):
+        return "Error: Appointment ID must be a valid number."
+
+    async with tool_db_session() as db:
+        updated_appointment = await mark_appointment_discharged(
+            db, appointment_id=appointment_id, doctor_id=user_id
+        )
+
+        if updated_appointment:
+            if updated_appointment.is_discharged:  # Confirm it was set
+                return f"Successfully marked appointment ID {appointment_id} as discharged."
+            else:
+                # This case should ideally not happen if logic is correct
+                return f"Attempted to mark appointment ID {appointment_id} as discharged, but the status did not change."
+        else:
+            return f"Could not mark appointment ID {appointment_id} as discharged. It might not exist, may not belong to you, or an error occurred."

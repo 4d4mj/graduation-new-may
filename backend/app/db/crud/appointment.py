@@ -626,3 +626,65 @@ async def get_appointments_for_doctor_on_date(
         f"CRUD: Found {len(appointments)} 'scheduled' appointments for doctor {doctor_id} on {target_date}"
     )
     return appointments
+
+
+async def mark_appointment_discharged(
+    db: AsyncSession,
+    appointment_id: int,
+    doctor_id: int,  # To ensure the doctor owns this appointment
+) -> Optional[AppointmentModel]:
+    """
+    Marks a specific appointment as discharged.
+    Ensures the appointment belongs to the requesting doctor.
+    """
+    logger.info(
+        f"CRUD: Attempting to mark appointment_id {appointment_id} as discharged by doctor_id {doctor_id}"
+    )
+
+    # Use the existing get_appointment which has permission checks
+    try:
+        # Role 'doctor' for permission check within get_appointment
+        appointment_to_update = await get_appointment(
+            db, appointment_id=appointment_id, user_id=doctor_id, role="doctor"
+        )
+    except HTTPException as e:
+        if e.status_code == 404:
+            logger.warning(
+                f"CRUD: Appointment {appointment_id} not found for doctor {doctor_id}."
+            )
+            return None
+        elif e.status_code == 403:
+            logger.warning(
+                f"CRUD: Doctor {doctor_id} not authorized to modify appointment {appointment_id}."
+            )
+            return None
+        raise  # Re-raise other HTTPExceptions
+
+    if not appointment_to_update:
+        logger.warning(
+            f"CRUD: Appointment {appointment_id} not found or not associated with doctor_id {doctor_id}."
+        )
+        return None
+
+    if appointment_to_update.is_discharged:
+        logger.info(
+            f"CRUD: Appointment {appointment_id} is already marked as discharged."
+        )
+        # Optionally return it anyway, or a specific message
+        return appointment_to_update
+
+    appointment_to_update.is_discharged = True
+    try:
+        await db.commit()
+        await db.refresh(appointment_to_update)
+        logger.info(
+            f"CRUD: Successfully marked appointment {appointment_id} as discharged."
+        )
+        return appointment_to_update
+    except Exception as e:
+        await db.rollback()
+        logger.error(
+            f"CRUD: Error committing discharge for appointment {appointment_id}: {e}",
+            exc_info=True,
+        )
+        return None
