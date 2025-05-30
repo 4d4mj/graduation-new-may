@@ -217,42 +217,43 @@ export function RegisterForm({ className, ...props }) {
 							/>
 
 							{/* Password */}
-							<FormField
-								control={form.control}
-								name="password"
-								render={({ field }) => (
-									<FormItem>
-										<FormLabel>Password</FormLabel>
-										<FormControl>
-											<Input
-												type="password"
-												{...field}
-												autoComplete="new-password"
-											/>
-										</FormControl>
-										<FormMessage />
-									</FormItem>
-								)}
-							/>
-
-							{/* Repeat Password */}
-							<FormField
-								control={form.control}
-								name="repeat_password"
-								render={({ field }) => (
-									<FormItem>
-										<FormLabel>Repeat Password</FormLabel>
-										<FormControl>
-											<Input
-												type="password"
-												{...field}
-												autoComplete="new-password"
-											/>
-										</FormControl>
-										<FormMessage />
-									</FormItem>
-								)}
-							/>
+							<div className="flex gap-2">
+								<FormField
+									control={form.control}
+									name="password"
+									render={({ field }) => (
+										<FormItem>
+											<FormLabel>Password</FormLabel>
+											<FormControl>
+												<Input
+													type="password"
+													{...field}
+													autoComplete="new-password"
+												/>
+											</FormControl>
+											<FormMessage />
+										</FormItem>
+									)}
+								/>
+								{/* Repeat Password */}
+								<FormField
+									control={form.control}
+									name="repeat_password"
+									render={({ field }) => (
+										<FormItem>
+											<FormLabel>Repeat Password</FormLabel>
+											<FormControl>
+												<Input
+													type="password"
+													{...field}
+													autoComplete="new-password"
+												/>
+											</FormControl>
+											<FormMessage />
+										</FormItem>
+									)}
+								/>
+							</div>
 
 							<Button
 								type="submit"

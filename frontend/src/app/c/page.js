@@ -10,12 +10,12 @@ export default async function Page() {
 
 	if (!user) {
 		console.log("No user found, redirecting to login...");
-		// redirect("/login");
+		redirect("/login");
 	}
 
 	return (
 		<SidebarProvider defaultOpen={false}>
-			<ChatSideBar />
+			<ChatSideBar user={user} />
 			<Chat user={user} />
 		</SidebarProvider>
 	);

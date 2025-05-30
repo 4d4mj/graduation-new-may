@@ -61,6 +61,7 @@ class ChatResponse(BaseModel):
     * `interrupt_id` - ID of the interrupt if this response is a pause for user confirmation
     * `session_id`   - Alias for session to maintain backward compatibility
     * `messages`     - List of messages in the conversation history (optional)
+    * `thinking_time` - Time in seconds that the AI took to generate the response
     """
 
     reply: Any  # Can be string or structured data for special bubbles
@@ -69,3 +70,4 @@ class ChatResponse(BaseModel):
     interrupt_id: Optional[str] = None
     session_id: Optional[str] = None
     messages: Optional[List[ChatMessage]] = None
+    thinking_time: Optional[float] = None

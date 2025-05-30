@@ -23,9 +23,23 @@ export async function login(formData) {
 	});
 
 	if (!res.ok) {
+		console.log("Login failed with status:", res.status);
 		const body = await res.json().catch(() => ({}));
-		return { errors: body.detail || "Invalid credentials" };
+
+		// Handle different status codes
+		if (res.status === 500) {
+			return {
+				errors: "Server error occurred. Please try again later.",
+				status: 500,
+			};
+		}
+
+		return {
+			errors: body.detail || "Invalid credentials",
+			status: res.status,
+		};
 	}
 
+	// Only redirect on success
 	redirect("/c");
 }

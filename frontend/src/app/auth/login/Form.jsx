@@ -94,12 +94,6 @@ export function LoginForm({ className, ...props }) {
 									<FormItem>
 										<div className="flex items-center justify-between">
 											<FormLabel>Password</FormLabel>
-											<Link
-												href="/forgot-password"
-												className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
-											>
-												Forgot your password?
-											</Link>
 										</div>
 										<FormControl>
 											<Input

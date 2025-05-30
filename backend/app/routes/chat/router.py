@@ -1,6 +1,7 @@
 # backend/app/routes/chat/router.py
 
 import logging
+import time
 from fastapi import APIRouter, HTTPException, Cookie, Request, Depends
 from app.config.settings import env
 from langchain_core.messages import HumanMessage, BaseMessage, ToolMessage
@@ -41,7 +42,7 @@ def _find_last_tool_or_ai_message(messages):
     return messages[-1].content if messages else None  # Fallback to last message
 
 
-@router.post("/", response_model=ChatResponse, status_code=200)
+@router.post("/message", response_model=ChatResponse, status_code=200)
 async def chat(
     payload: ChatRequest,
     request: Request,
@@ -72,11 +73,10 @@ async def chat(
     else:
         logger.info(
             f"Chat request: Successfully retrieved graph for role '{role}'."
-        )  # Log successful retrieval
-
-    # 3. Graph Invocation
+        )  # Log successful retrieval    # 3. Graph Invocation
     config = {"configurable": {"thread_id": session}}
     final_state = None
+    start_time = time.time()  # Start timing
     try:
         # NOTE: Interrupt handling is kept, assuming it might be needed for complex flows later,
         # but the doctor agent currently isn't expected to trigger it.
@@ -123,12 +123,16 @@ async def chat(
             agent="System",  # Indicate it's an interrupt state
             interrupt_id=gi.ns[0],
             messages=response_messages_interrupt,
+            thinking_time=round(time.time() - start_time, 2),  # Add thinking time even for interrupts
         )
     except Exception as e:
         logger.exception(f"Error running graph for role '{role}'")
         raise HTTPException(500, f"Processing error: {e}")
 
     # --- Process the final state ---
+    end_time = time.time()  # End timing
+    thinking_time = round(end_time - start_time, 2)  # Calculate thinking time in seconds
+
     if final_state is None:
         logger.error(
             f"Graph execution finished for role '{role}' but final_state is None."
@@ -181,9 +185,7 @@ async def chat(
         if content:
             response_messages.append(ChatMessage(role=msg_role, content=content))
 
-    logger.info(f"Final reply string for role '{role}': '{reply[:100]}...'")
-
-    # --- Return Response (matching ChatResponse schema) ---
+    logger.info(f"Final reply string for role '{role}': '{reply[:100]}...'")    # --- Return Response (matching ChatResponse schema) ---
     return ChatResponse(
         reply=reply,
         agent=agent_name,
@@ -191,42 +193,65 @@ async def chat(
         session=session,
         session_id=session,  # Include history
         interrupt_id=None,  # Explicitly null unless set by GraphInterrupt block
+        thinking_time=thinking_time,  # Add thinking time to response
+    )
+
+# Test endpoints for different HTTP status codes
+@router.post("/test/500")
+async def test_internal_server_error(payload: ChatRequest):
+    """
+    Test endpoint that always returns a 500 Internal Server Error.
+    Useful for testing error handling in the frontend.
+    """
+    raise HTTPException(status_code=500, detail="This is a test 500 error for development purposes")
+
+
+@router.post("/test/403")
+async def test_forbidden(payload: ChatRequest):
+    """
+    Test endpoint that always returns a 403 Forbidden error.
+    Useful for testing authentication/authorization error handling.
+    """
+    raise HTTPException(status_code=403, detail="Access forbidden - test endpoint")
+
+
+@router.post("/test/422")
+async def test_unprocessable_entity(payload: ChatRequest):
+    """
+    Test endpoint that always returns a 422 Unprocessable Entity error.
+    Useful for testing validation error handling.
+    """
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "message": "Validation failed",
+            "errors": [
+                {"field": "test_field", "message": "This is a test validation error"}
+            ]
+        }
     )
 
 
-# Keep the /test endpoint for UI testing if needed
-@router.post("/test", response_model=ChatResponse, status_code=200)
-async def testChat(
-    current_user: dict = Depends(get_current_user),
-    session: str | None = Cookie(default=None, alias="session"),
-):
+@router.post("/test/401")
+async def test_unauthorized(payload: ChatRequest):
     """
-    Simulates a more realistic chat interaction for UI testing.
-    Includes mock history and varied, longer responses.
+    Test endpoint that always returns a 401 Unauthorized error.
+    Useful for testing authentication error handling.
     """
-    # We're now using the middleware for authentication, no need to decode the token again
+    raise HTTPException(status_code=401, detail="Authentication required - test endpoint")
 
-    # --- Simulate Realistic Interaction ---
-    # Select a random realistic reply
-    reply = random.choice(
-        [
-            "That's an interesting point. Could you elaborate a bit more on that?",
-            "I understand. Based on what you've said, perhaps we could explore options like [Option A] or [Option B]. What are your thoughts?",
-            "Thank you for sharing that. Let me process this information. One moment please...",
-            "Okay, I've noted that down. Is there anything else you'd like to add or discuss regarding this topic?",
-            "Processing your request... This might take a few moments. In the meantime, have you considered [Related Topic]?",
-            "Acknowledged. I'm accessing the relevant information now. This is a complex area, so accuracy is key.",
-            "Let's break that down. The first aspect to consider is [...], followed by [...]. Does that make sense so far?",
-        ]
-    )
 
-    reply = '{"type": "slots", "doctor": "Chen", "date": "May 6, 2025", "options": ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:30", "15:00", "15:30", "16:00", "16:30"]}'
-
-    agent_name = "Medical Assistant"
-
-    # --- Return Response ---
+@router.post("/test/slow")
+async def test_slow_response():
+    """
+    Test endpoint that simulates a slow response (5 seconds).
+    Useful for testing loading states and thinking animations.
+    """
+    import asyncio
+    await asyncio.sleep(5)  # Simulate slow processing
     return ChatResponse(
-        reply=reply,
-        agent=agent_name,
-        messages=[ChatMessage(role="assistant", content=reply)],
+        reply="This response took 5 seconds to generate!",
+        agent="Slow Test Agent",
+        messages=[ChatMessage(role="assistant", content="This response took 5 seconds to generate!")],
+        thinking_time=5.0,
     )

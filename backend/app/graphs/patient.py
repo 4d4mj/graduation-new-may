@@ -2,7 +2,6 @@ from langgraph.graph import StateGraph, END # type: ignore
 from app.tools.guardrails import guard_in, guard_out
 from app.graphs.states import PatientState
 from app.graphs.agents import patient_agent
-from app.tools.scheduler.interrupt import confirm_booking
 import logging
 from typing import Literal, Optional
 from langchain_core.messages import ToolMessage
@@ -11,7 +10,7 @@ from langchain_core.messages import ToolMessage
 logger = logging.getLogger(__name__)
 
 # Define tools for direct output
-DIRECT_TO_UI_PATIENT_TOOLS = {"list_free_slots", "list_doctors"}
+DIRECT_TO_UI_PATIENT_TOOLS = {"list_free_slots", "list_doctors", "book_appointment", "propose_booking"}
 
 
 # --- ADD THIS ROUTING FUNCTION ---
@@ -37,16 +36,11 @@ def get_last_tool_invocation(state: dict) -> Optional[ToolMessage]:
 # --- END ADDITION ---
 
 # --- ADD THIS ROUTING FUNCTION ---
-def route_after_agent(state: dict) -> Literal["confirm", "structured_output_patient", "guard_out"]:
+def route_after_agent(state: dict) -> Literal["structured_output_patient", "guard_out"]:
     last_tool_message = get_last_tool_invocation(state)
 
     if last_tool_message:
-        if last_tool_message.name == "propose_booking":
-            state["pending_booking"] = last_tool_message.content
-            state["agent_name"] = "Scheduler"
-            logger.info(f"Detected propose_booking tool call: {last_tool_message.content}, routing to confirmation step")
-            return "confirm"
-        elif last_tool_message.name in DIRECT_TO_UI_PATIENT_TOOLS:
+        if last_tool_message.name in DIRECT_TO_UI_PATIENT_TOOLS:
             state["raw_tool_output"] = last_tool_message.content
             state["is_direct_tool_response"] = True
             logger.info(f"Detected direct UI tool call: {last_tool_message.name}, routing to structured_output_patient")
@@ -71,12 +65,6 @@ def structured_output_patient_node(state: dict) -> dict:
     return state
 # --- END ADDITION ---
 
-# Edges from confirm_booking:
-def route_after_confirm(state: dict) -> Literal["agent", "guard_out"]:
-    if state.get("final_output"):
-        return "guard_out"
-    return "agent"
-
 def create_patient_graph() -> StateGraph:
     """
     Create a streamlined patient orchestrator graph using the prebuilt React agent approach.
@@ -95,7 +83,6 @@ def create_patient_graph() -> StateGraph:
     # Add nodes
     g.add_node("guard_in", guard_in)
     g.add_node("agent", patient_agent.medical_agent.ainvoke)
-    g.add_node("confirm", confirm_booking)
     g.add_node("guard_out", guard_out)
     g.add_node("structured_output_patient", structured_output_patient_node)
 
@@ -113,32 +100,19 @@ def create_patient_graph() -> StateGraph:
     )
     # --- END REPLACEMENT ---
 
-    # --- ADD CONDITIONAL EDGE FROM AGENT TO EITHER CONFIRM OR GUARD_OUT ---
+    # --- ADD CONDITIONAL EDGE FROM AGENT TO EITHER STRUCTURED_OUTPUT OR GUARD_OUT ---
     g.add_conditional_edges(
         "agent",
         route_after_agent,
         {
-            "confirm": "confirm",   # If pending_booking exists, go to confirmation
             "structured_output_patient": "structured_output_patient",  # If direct tool response, go to structured output
             "guard_out": "guard_out"  # Otherwise proceed to output guardrail
         }
     )
     # --- END ADDITION ---
 
-    # Edges from confirm_booking:
-    g.add_conditional_edges(
-        "confirm",
-        route_after_confirm,
-        {
-            "agent": "agent",      # If confirmed, agent executes book_appointment
-            "guard_out": "guard_out" # If declined
-        }
-    )
-
-    # Add edge from confirm to guard_out
-    g.add_edge("confirm", "guard_out")
     g.add_edge("guard_out", END)
     g.add_edge("structured_output_patient", END)
 
-    logger.info("Patient graph created with booking confirmation flow.")
+    logger.info("Patient graph created with direct tool output flow.")
     return g

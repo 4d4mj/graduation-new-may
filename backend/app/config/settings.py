@@ -18,7 +18,6 @@ class Settings(BaseSettings):
 
     # API keys
     google_api_key: str = Field(..., env="GOOGLE_API_KEY")
-    groq_api_key: str = Field(..., env="GROQ_API_KEY")
     cohere_api_key: Optional[str] = Field(None, env="COHERE_API_KEY")
     tavily_api_key: Optional[str] = Field(None, env="TAVILY_API_KEY")
 

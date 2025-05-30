@@ -132,3 +132,18 @@
 .rdp-vhidden {
   @apply hidden;
 }
+
+/* Custom animations for thinking bubble */
+@keyframes shine {
+  0% {
+    background-position: 200%;
+  }
+  100% {
+    background-position: -400%;
+  }
+}
+
+.animate-shine {
+  animation: shine 3s ease-in-out infinite;
+  background-size: 200% auto;
+}

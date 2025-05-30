@@ -24,6 +24,7 @@
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"date-fns": "^3.6.0",
+		"date-fns-tz": "^3.2.0",
 		"jose": "^6.0.10",
 		"lucide-react": "^0.503.0",
 		"material-symbols": "^0.31.2",

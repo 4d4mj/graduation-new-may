@@ -1,14 +1,13 @@
-# app/db/crud/appointment.py
 import logging
 from datetime import datetime, date, time, timedelta, timezone
 from typing import List, Optional, Dict, Any, Union
+from zoneinfo import ZoneInfo  # Added import
 
 from sqlalchemy import select, insert, delete, update, and_, or_, Date, cast
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from fastapi import HTTPException
-from babel.dates import format_datetime
 from app.db.crud.user import get_user
 
 from app.db.models.appointment import AppointmentModel
@@ -200,32 +199,56 @@ async def get_appointments(
     for appointment in appointments:
         # Fetch the doctor profile
         doctor = await get_user(db, appointment.doctor_id)
-        if not doctor or not doctor.doctor_profile:
-            continue  # Skip appointments with missing doctor profiles
+        # Initialize patient_profile as None
+        patient_profile_data = None
 
-        logger.info(
-            f"Doctor profile for appointment ID {appointment.id}: {doctor.doctor_profile}"
-        )
+        # If the current user is a doctor, fetch the patient profile
+        if role == "doctor":
+            patient = await get_user(db, appointment.patient_id)
+            if patient and patient.patient_profile:
+                patient_profile_data = {
+                    "first_name": patient.patient_profile.first_name,
+                    "last_name": patient.patient_profile.last_name,
+                    # Add other patient profile fields if needed, e.g., "email": patient.email
+                }
+            elif patient:
+                 # Handle case where patient exists but profile might be missing (if applicable)
+                logger.warning(f"Patient profile missing for patient_id {appointment.patient_id} in appointment {appointment.id}")
+            else:
+                logger.warning(f"Patient not found for patient_id {appointment.patient_id} in appointment {appointment.id}")
+
+        doctor_profile_data = None
+        if doctor and doctor.doctor_profile:
+            doctor_profile_data = {
+                "first_name": doctor.doctor_profile.first_name,
+                "last_name": doctor.doctor_profile.last_name,
+                "specialty": doctor.doctor_profile.specialty,
+            }
+        elif doctor:
+            logger.warning(f"Doctor profile missing for doctor_id {appointment.doctor_id} in appointment {appointment.id}")
+        else:
+            logger.warning(f"Doctor not found for doctor_id {appointment.doctor_id} in appointment {appointment.id}")
+
+        # Skip appointment if essential doctor profile is missing (retain original logic if needed or adjust)
+        # For now, we'll include the appointment even if a profile is partially missing,
+        # but the profile data itself will be None or incomplete.
+        # if not doctor_profile_data:
+        #     continue
 
         logger.debug(f"Processing appointment ID {appointment.id}")
-        logger.debug(f"Doctor data: {doctor}")
-        logger.debug(f"Doctor profile: {doctor.doctor_profile}")
 
         enhanced_appointments.append(
             {
                 "id": appointment.id,
                 "patient_id": appointment.patient_id,
-                "doctor_id": appointment.doctor_id,  # Add doctor_id to the response
-                "doctor_profile": {
-                    "first_name": doctor.doctor_profile.first_name,
-                    "last_name": doctor.doctor_profile.last_name,
-                    "specialty": doctor.doctor_profile.specialty,
-                },
-                "starts_at": appointment.starts_at,  # Return datetime object
-                "ends_at": appointment.ends_at,  # Return datetime object
+                "doctor_id": appointment.doctor_id,
+                "doctor_profile": doctor_profile_data,
+                "patient_profile": patient_profile_data, # Add patient_profile to the response
+                "starts_at": appointment.starts_at,
+                "ends_at": appointment.ends_at,
                 "location": appointment.location,
                 "notes": appointment.notes,
-                "created_at": appointment.created_at,  # Return datetime object
+                "created_at": appointment.created_at,
             }
         )
 
@@ -387,8 +410,8 @@ async def get_doctor_availability(
         raise HTTPException(status_code=404, detail="Doctor not found")
 
     # Define working hours (8 AM to 5 PM)
-    start_hour = 8
-    end_hour = 17
+    start_hour = 5
+    end_hour = 12
 
     # Get the start and end of the requested date - MAKE TIMEZONE AWARE
     date_start = datetime(
@@ -442,54 +465,66 @@ async def get_doctor_availability(
 async def get_available_slots_for_day(
     db: AsyncSession,
     doctor_id: int,
-    target_date: date,
+    target_date: date,  # This is a date object, representing the day in user's perspective
+    user_tz: Optional[str],  # Added user_tz parameter
     slot_duration: int = 30,
     format_time: bool = True,
-) -> List[str]:
+) -> List[str]:  # Return type is List[str] if format_time is True, otherwise List[datetime]
     """
     Get available time slots for a doctor on a specific date formatted as strings
+    or as datetime objects, adjusted for the user's timezone if provided.
 
     Args:
         db: Database session
         doctor_id: ID of the doctor
-        target_date: Date to check availability for (date object, not datetime)
+        target_date: Date to check availability for (date object, user's perspective)
+        user_tz: The user's timezone string (e.g., 'America/New_York')
         slot_duration: Duration of each slot in minutes
-        format_time: Whether to return times as formatted strings (e.g., "9:00 AM") or datetime objects
+        format_time: Whether to return times as formatted strings (e.g., "9:00 AM")
 
     Returns:
-        List of available time slots as formatted strings or datetime objects
+        List of available time slots (strings or datetimes).
     """
-    logger.info(f"Getting available slots for doctor {doctor_id} on {target_date}")
+    logger.info(f"Getting available slots for doctor {doctor_id} on {target_date} for user_tz {user_tz}")
 
     try:
-        # Convert date to datetime for availability check with UTC timezone
-        target_datetime = datetime.combine(target_date, time(0, 0))
+        # target_datetime represents the start of the target_date in a naive way,
+        # get_doctor_availability will handle UTC conversions for working hours.
+        target_datetime_naive = datetime.combine(target_date, time(0, 0))
 
-        # Get available slots as datetime objects
-        available_slots = await get_doctor_availability(
+        # Get available slots as UTC datetime objects
+        available_utc_slots: List[datetime] = await get_doctor_availability(
             db=db,
             doctor_id=doctor_id,
-            date=target_datetime,
+            date=target_datetime_naive,  # Pass the naive datetime; get_doctor_availability assumes it's for UTC working hours
             slot_duration=slot_duration,
         )
 
-        # Format times if requested
-        if format_time:
-            formatted_slots = []
-            for slot in available_slots:
-                # Format as "9:00 AM", "2:30 PM", etc.
-                formatted_time = slot.strftime("%-I:%M %p")
-                formatted_slots.append(formatted_time)
-            return formatted_slots
+        if not format_time:
+            # If not formatting, consumer needs to be aware these are UTC
+            # Or, we could convert them here too if a user_tz is provided.
+            # For now, returning raw UTC datetimes if not formatting.
+            return available_utc_slots
 
-        return available_slots
+        # Format times, converting to user's timezone if provided
+        formatted_slots = []
+        display_tz = ZoneInfo(user_tz) if user_tz else timezone.utc
+
+        for slot_utc in available_utc_slots:
+            slot_display_tz = slot_utc.astimezone(display_tz)
+            # Format as "9:00 AM", "2:30 PM", etc.
+            formatted_time = slot_display_tz.strftime("%-I:%M %p").strip()  # strip potential leading space from %-I on some systems
+            if formatted_time.startswith("0"):  # handle cases like "09:00 AM" -> "9:00 AM"
+                formatted_time = formatted_time[1:]
+            formatted_slots.append(formatted_time)
+
+        logger.debug(f"Formatted slots for doctor {doctor_id} on {target_date} in tz {display_tz}: {formatted_slots}")
+        return formatted_slots
 
     except Exception as e:
-        # Log the error but don't re-raise - return a properly structured error response
         logger.error(
-            f"Error getting available slots for doctor {doctor_id}: {e}", exc_info=True
+            f"Error getting available slots for doctor {doctor_id} on {target_date} with user_tz {user_tz}: {e}", exc_info=True
         )
-        # Return empty list which will be handled by the tool to show "no slots available"
         return []
 
 

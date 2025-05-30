@@ -29,6 +29,14 @@ class AppointmentDoctorProfile(BaseModel):
     class Config:
         from_attributes = True
 
+class AppointmentPatientProfile(BaseModel): # New model for patient details
+    first_name: str
+    last_name: str
+    # email: Optional[str] = None # Example: if you want to show patient email
+
+    class Config:
+        from_attributes = True
+
 class AppointmentBase(BaseModel):
     doctor_id: int
     starts_at: datetime
@@ -52,6 +60,7 @@ class Appointment(AppointmentBase):
     patient_id: int
     created_at: datetime
     doctor_profile: Optional[AppointmentDoctorProfile] = None
+    patient_profile: Optional[AppointmentPatientProfile] = None # Added for doctor's view
 
     class Config:
         from_attributes = True

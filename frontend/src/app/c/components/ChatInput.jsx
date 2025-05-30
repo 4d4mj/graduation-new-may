@@ -44,7 +44,7 @@ export default function ChatInput({ input, setInput, handleSubmit }) {
 			<form
 				id="chat-form"
 				onSubmit={onSubmit}
-				className="bg-form rounded-lg overflow-hidden"
+				className="bg-white rounded-lg overflow-hidden"
 			>
 				<Textarea
 					value={input}

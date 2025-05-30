@@ -285,7 +285,7 @@ async def list_free_slots(
                 doctor_id = None
 
         logger.info(
-            f"Tool 'list_free_slots' called for doctor_id={doctor_id}, doctor_name={doctor_name} on {target_day}"
+            f"Tool 'list_free_slots' called for doctor_id={doctor_id}, doctor_name={doctor_name} on {target_day} with user_tz={user_tz}"
         )
 
         if not doctor_id and not doctor_name:
@@ -314,12 +314,12 @@ async def list_free_slots(
                 logger.warning(f"Doctor {id_or_name} not found.")
                 return {"type": "error", "message": f"Doctor {id_or_name} not found."}
 
-            # Now get available slots using doctor's ID
+            # Now get available slots using doctor's ID, passing user_tz
             logger.debug(
-                f"Found doctor {doctor.user_id}: {doctor.first_name} {doctor.last_name}. Checking slots..."
+                f"Found doctor {doctor.user_id}: {doctor.first_name} {doctor.last_name}. Checking slots for target_day: {target_day} with user_tz: {user_tz}..."
             )
-            slots = await get_available_slots_for_day(db, doctor.user_id, target_day)
-            logger.debug(f"Found slots: {slots}")
+            slots = await get_available_slots_for_day(db, doctor.user_id, target_day, user_tz=user_tz) # Pass user_tz
+            logger.debug(f"Found slots (adjusted for user_tz if provided): {slots}")
 
         if not slots:
             return {
@@ -349,9 +349,6 @@ async def list_free_slots(
         return {"type": "error", "message": error_msg}
 
 
-# In backend/app/tools/scheduler/tools.py
-
-
 @tool("book_appointment")
 async def book_appointment(
     doctor_id: int = None,
@@ -362,7 +359,7 @@ async def book_appointment(
     duration_minutes: int = 30,
     location: str = "Main Clinic",
     notes: str | None = None,
-    send_google_calendar_invite: bool = False,
+    send_google_calendar_invite: bool = True,
     gcal_summary_override: Optional[str] = None,
     gcal_description_override: Optional[str] = None,
 ) -> dict:
@@ -494,19 +491,33 @@ async def book_appointment(
             clinic_booking_result = appointment_result_or_obj
         elif hasattr(appointment_result_or_obj, "id"):
             db_appointment_object = appointment_result_or_obj
+
+            # Determine the display timezone
+            display_tz_str = user_tz or GCAL_DEFAULT_TIMEZONE
+            display_tz = ZoneInfo(display_tz_str)
+
+            # start_dt_clinic_utc is already a UTC aware datetime object
+            # Format it for the user's timezone for display
+            formatted_start_dt_local = format_datetime(
+                start_dt_clinic_utc, format="MMMM d, yyyy, h:mm a", locale="en", tzinfo=display_tz
+            )
+            # Also format the end time for display if needed, though not currently in output
+            # end_dt_display = end_dt_clinic_utc.astimezone(display_tz)
+            # formatted_end_dt_local = format_datetime(
+            #     end_dt_display, format="long", locale="en", tzinfo=display_tz
+            # )
+
             clinic_booking_result = {
                 "status": "confirmed",
                 "id": db_appointment_object.id,
                 "doctor_id": doctor_model_instance.user_id,
                 "doctor_name": doctor_full_name_for_gcal,
                 "doctor_email": doctor_email_address,
-                "start_dt": format_datetime(
-                    start_dt_clinic_utc, "long", locale="en", tzinfo=pytz.utc
-                ),
+                "start_dt": formatted_start_dt_local,  # Use the locally formatted time
                 "notes": notes,
             }
             logger.info(
-                f"Clinic appointment ID {db_appointment_object.id} confirmed in DB."
+                f"Clinic appointment ID {db_appointment_object.id} confirmed in DB. Original UTC: {start_dt_clinic_utc}, Display time ({display_tz_str}): {formatted_start_dt_local}"
             )
         else:
             clinic_booking_result = {
@@ -612,10 +623,59 @@ async def book_appointment(
                 google_calendar_status = (
                     f"Unexpected GCal error: {type(e_gcal).__name__} - {e_gcal}"
                 )
-                logger.error(google_calendar_status, exc_info=True)
+                logger.error(google_calendar_status, exc_info=True)    # Return structured output similar to other tools
+    if clinic_booking_result.get("status") == "confirmed":
+        # Success case - return structured confirmation
+        final_result = {
+            "type": "appointment_confirmed",
+            "status": "confirmed",
+            "appointment_id": clinic_booking_result.get("id"),
+            "doctor_id": clinic_booking_result.get("doctor_id"),
+            "doctor_name": clinic_booking_result.get("doctor_name"),
+            "doctor_email": clinic_booking_result.get("doctor_email"),
+            "start_dt": clinic_booking_result.get("start_dt"),
+            "location": location,
+            "notes": notes,
+            "google_calendar_invite_status": google_calendar_status,
+            "google_calendar_link": None,  # Will be updated if GCal invite was successful
+            "agent": "Scheduler"
+        }
 
-    final_result = {**clinic_booking_result}
-    final_result["google_calendar_invite_status"] = google_calendar_status
+        # Extract Google Calendar link if available
+        if "Link:" in google_calendar_status:
+            link_start = google_calendar_status.find("Link: ") + 6
+            link_end = google_calendar_status.find(" ", link_start)
+            if link_end == -1:
+                link_end = len(google_calendar_status)
+            final_result["google_calendar_link"] = google_calendar_status[link_start:link_end]
+
+    elif clinic_booking_result.get("status") == "error":
+        # Error case - return structured error
+        final_result = {
+            "type": "booking_error",
+            "status": "error",
+            "message": clinic_booking_result.get("message", "An error occurred while booking the appointment."),
+            "agent": "Scheduler"
+        }
+
+    elif clinic_booking_result.get("status") == "conflict":
+        # Conflict case - return structured conflict error
+        final_result = {
+            "type": "booking_conflict",
+            "status": "conflict",
+            "message": clinic_booking_result.get("message", "This time slot is already booked."),
+            "agent": "Scheduler"
+        }
+
+    else:
+        # Fallback for unexpected cases
+        final_result = {
+            "type": "booking_error",
+            "status": "error",
+            "message": "An unexpected error occurred during booking.",
+            "agent": "Scheduler"
+        }
+
     logger.info(f"book_appointment tool final result: {final_result}")
     return final_result
 
@@ -779,78 +839,113 @@ async def propose_booking(
     doctor_name: str = None,
     starts_at: str = None,
     notes: str | None = None,
+    user_tz: Annotated[str | None, InjectedState("user_tz")] = None, # Added user_tz
+    duration_minutes: int = 30 # Added duration_minutes for consistency
 ) -> dict:
     """
-    Return a booking proposal without touching the DB.
-
-    Parameters
-    ----------
-    doctor_id   : int  – Doctor's ID (preferred if available).
-    doctor_name : str  – Doctor's name (used if doctor_id not provided).
-    starts_at   : str  – Proposed start time of the appointment.
-    notes       : str  – Additional notes for the appointment.
+    Propose a booking time. This does NOT create an appointment but checks if a slot
+    is theoretically bookable and returns details for confirmation.
+    The 'starts_at' should be a specific date and time string.
     """
-    # Make sure doctor_id is an integer if provided
-    if doctor_id is not None:
-        try:
-            doctor_id = int(doctor_id)
-        except (ValueError, TypeError):
-            logger.warning(
-                f"Invalid doctor_id format: {doctor_id}, attempting to treat as name"
-            )
-            doctor_name = str(doctor_id)
-            doctor_id = None
+    logger.info(
+        f"Tool 'propose_booking' called for doctor_id={doctor_id}, doctor_name={doctor_name}, starts_at='{starts_at}', notes='{notes}' with user_tz='{user_tz}'"
+    )
 
     if not doctor_id and not doctor_name:
         return {
-            "type": "error",
-            "message": "Please provide either a doctor ID or a doctor name.",
+            "type": "proposal_error",
+            "message": "Please provide either a doctor ID or a doctor name for the proposal.",
         }
-
     if not starts_at:
         return {
-            "type": "error",
-            "message": "Please provide a start time for the appointment.",
+            "type": "proposal_error",
+            "message": "Please provide a start time for the proposed appointment.",
         }
 
-    logger.info(
-        f"Tool 'propose_booking' called for doctor_id={doctor_id}, doctor_name={doctor_name} at {starts_at}"
+    # Determine the effective timezone for parsing the input 'starts_at'
+    # This should be the user's timezone if available, otherwise a default.
+    effective_input_tz_str = user_tz or GCAL_DEFAULT_TIMEZONE
+
+    # Parse the provided 'starts_at' string.
+    # It's assumed to be in the user's local time (effective_input_tz_str).
+    # We convert it to UTC to check against DB, which stores in UTC.
+    parsed_dt_utc = dateparser.parse(
+        starts_at,
+        settings={
+            "TIMEZONE": effective_input_tz_str, # Assume input is in this timezone
+            "TO_TIMEZONE": "UTC",             # Convert to UTC for internal checks
+            "RETURN_AS_TIMEZONE_AWARE": True,
+            "PREFER_DATES_FROM": "future",
+        },
     )
 
-    try:
-        # Try to get doctor information to enhance the proposal
-        async with tool_db_session() as db:
-            doctor = None
-            if doctor_id:
-                doctor = await find_doctors(db, doctor_id=doctor_id, return_single=True)
-            elif doctor_name:
-                # Clean up the doctor_name - strip "Dr." prefix if present
-                cleaned_name = doctor_name
-                if cleaned_name.lower().startswith("dr."):
-                    cleaned_name = cleaned_name[3:].strip()
-                elif cleaned_name.lower().startswith("dr "):
-                    cleaned_name = cleaned_name[3:].strip()
+    if not parsed_dt_utc:
+        logger.warning(f"Invalid starts_at format for proposal: {starts_at}")
+        return {
+            "type": "proposal_error",
+            "message": f"I couldn't understand the proposed time '{starts_at}'. Please try a format like 'YYYY-MM-DD HH:MM' or 'tomorrow at 2pm'.",
+        }
 
-                doctor = await find_doctors(db, name=cleaned_name, return_single=True)
+    # Calculate end time in UTC
+    end_dt_utc = parsed_dt_utc + timedelta(minutes=duration_minutes)
 
-        if doctor:
-            full_name = f"Dr. {doctor.first_name} {doctor.last_name}"
-            return {
-                "type": "confirm_booking",
-                "doctor_id": doctor.user_id,
-                "doctor": full_name,
-                "specialty": doctor.specialty,
-                "starts_at": starts_at,
-                "notes": notes,
-            }
-    except Exception as e:
-        logger.warning(f"Error enriching booking proposal: {e}")
+    async with tool_db_session() as db:
+        doctor_model_instance = None
+        if doctor_id:
+            doctor_model_instance = await find_doctors(
+                db, doctor_id=doctor_id, return_single=True
+            )
+        elif doctor_name:
+            cleaned_name = doctor_name
+            if cleaned_name.lower().startswith("dr."):
+                cleaned_name = cleaned_name[3:].strip()
+            elif cleaned_name.lower().startswith("dr "):
+                cleaned_name = cleaned_name[3:].strip()
+            doctor_model_instance = await find_doctors(
+                db, name=cleaned_name, return_single=True
+            )
 
-    # Fallback to basic proposal if doctor lookup fails
-    doctor_info = doctor_id if doctor_id else doctor_name
-    return {
-        "type": "confirm_booking",
-        "doctor": doctor_info,
-        "starts_at": starts_at,
-        "notes": notes,
-    }
+        if not doctor_model_instance:
+            return {"type": "proposal_error", "message": "Doctor not found for proposal."}
+
+        # Check for conflicts (this is a simplified check, create_appointment has the robust one)
+        # For a proposal, we might just check if the exact slot is in the *available* slots list.
+        # This requires converting the proposed UTC time back to the clinic's local day and then checking.
+        # Or, more simply, attempt a dry-run of create_appointment or check against existing.
+
+        # For now, let's assume the main purpose is to format the proposed time correctly for the user.
+        # A full conflict check here might be redundant if the next step is always `book_appointment`.
+
+        # Determine the display timezone (user's TZ or default)
+        display_tz_str = user_tz or GCAL_DEFAULT_TIMEZONE
+        display_tz = ZoneInfo(display_tz_str)
+
+        # Convert the UTC parsed time to the display timezone for the proposal message
+        parsed_dt_display = parsed_dt_utc.astimezone(display_tz)
+
+        # Format for display
+        formatted_starts_at_display = format_datetime(
+            parsed_dt_display, format="MMMM d, yyyy, h:mm a", locale="en" # Using "full" for clarity in proposal
+        ) # format="long" is also good: e.g., January 15, 2024 at 3:00 PM GMT+3
+
+        doctor_full_name = f"Dr. {doctor_model_instance.first_name} {doctor_model_instance.last_name}"
+
+        # Construct a message that uses the time in the user's timezone
+        proposal_message = f"OK. I can propose an appointment for you with {doctor_full_name} on {formatted_starts_at_display}."
+        if notes:
+            proposal_message += f" With notes: \"{notes}\"."
+        proposal_message += " Does that sound right?"
+
+        return {
+            "type": "booking_proposal",
+            "doctor_id": doctor_model_instance.user_id,
+            "doctor_name": doctor_full_name,
+            "doctor_specialty": doctor_model_instance.specialty,
+            "proposed_starts_at_utc": parsed_dt_utc.isoformat(), # Keep UTC for potential booking step
+            "proposed_starts_at_display": formatted_starts_at_display, # For user confirmation
+            "duration_minutes": duration_minutes,
+            "notes": notes,
+            "message": proposal_message, # The user-facing confirmation message
+            "agent": "Scheduler",
+            "reply_template": "Yes, that sounds right, please book it."
+        }
